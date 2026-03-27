@@ -1,0 +1,148 @@
+.def
+.argc 0
+.locals 5
+.name BubbleSortStandalone
+.constants
+number 0
+number 1
+number 5
+number 2
+number 9
+.code
+
+// --- 1. Создание и заполнение массива [5, 2, 9, 1, 5] ---
+build_array
+set_local 0
+pop
+
+// push(5) - константа 2
+get_local 0
+const 2
+array_push
+pop
+
+// push(2) - константа 3
+get_local 0
+const 3
+array_push
+pop
+
+// push(9) - константа 4
+get_local 0
+const 4
+array_push
+pop
+
+// push(1) - константа 1
+get_local 0
+const 1
+array_push
+pop
+
+// push(5) - константа 2
+get_local 0
+const 2
+array_push
+pop
+
+// --- 2. Логика сортировки Bubble Sort ---
+// local 1 = array_len(local 0)
+get_local 0
+array_len
+set_local 1
+pop
+
+// local 2 = 0
+const 0
+set_local 2
+pop
+
+outercond:
+get_local 2
+get_local 1
+const 1
+sub
+clt
+jmp_false outerend
+jmp outerblock
+
+outeraction:
+get_local 2
+const 1
+add
+set_local 2
+pop
+jmp outercond
+
+outerblock:
+const 0
+set_local 3
+pop
+
+innercond:
+get_local 3
+get_local 1
+get_local 2
+sub
+const 1
+sub
+clt
+jmp_false innerend
+jmp innerblock
+
+inneraction:
+get_local 3
+const 1
+add
+set_local 3
+pop
+jmp innercond
+
+innerblock:
+get_local 0
+get_local 3
+get_index
+get_local 0
+get_local 3
+const 1
+add
+get_index
+cgt
+jmp_false endif
+
+// Обмен значениями
+get_local 0
+get_local 3
+get_index
+set_local 4
+pop
+
+get_local 0
+get_local 3
+get_local 0
+get_local 3
+const 1
+add
+get_index
+set_index
+pop
+
+get_local 0
+get_local 3
+const 1
+add
+get_local 4
+set_index
+pop
+
+endif:
+jmp inneraction
+
+innerend:
+jmp outeraction
+
+outerend:
+// Возврат отсортированного массива
+get_local 0
+return
+.end_def

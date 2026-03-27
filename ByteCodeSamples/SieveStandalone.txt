@@ -1,0 +1,153 @@
+.def
+.argc 0
+.locals 5
+.name SieveStandalone
+.constants
+number 50   // 0: N = 50
+number 0    // 1: 0
+number 1    // 2: 1
+false       // 3: false
+true        // 4: true
+number 2    // 5: 2
+string " "
+.code
+
+build_array
+set_local 0
+pop
+
+const 1
+set_local 1
+pop
+
+fill_loop_cond:
+get_local 1
+const 0
+cgt
+jmp_false fill_loop_body
+jmp fill_loop_end
+
+fill_loop_body:
+get_local 0
+const 4
+array_push
+pop
+
+get_local 1
+const 2
+add
+set_local 1
+pop
+jmp fill_loop_cond
+
+fill_loop_end:
+get_local 0
+const 1
+const 3
+set_index
+pop
+
+get_local 0
+const 2
+const 3
+set_index
+pop
+
+const 5
+set_local 2
+pop
+
+sieve_outer_cond:
+get_local 2
+get_local 2
+mul
+const 0
+cgt
+jmp_false sieve_outer_body
+jmp print_start
+
+sieve_outer_body:
+get_local 0
+get_local 2
+get_index
+const 4
+ceq
+jmp_false sieve_outer_inc
+
+get_local 2
+get_local 2
+mul
+set_local 3
+pop
+
+sieve_inner_cond:
+get_local 3
+const 0
+cgt
+jmp_false sieve_inner_body
+jmp sieve_outer_inc
+
+sieve_inner_body:
+get_local 0
+get_local 3
+const 3
+set_index
+pop
+
+get_local 3
+get_local 2
+add
+set_local 3
+pop
+jmp sieve_inner_cond
+
+sieve_outer_inc:
+get_local 2
+const 2
+add
+set_local 2
+pop
+jmp sieve_outer_cond
+
+print_start:
+const 5
+set_local 2
+pop
+
+print_cond:
+get_local 2
+const 0
+cgt
+jmp_false print_body
+jmp end_sieve
+
+print_body:
+get_local 0
+get_local 2
+get_index
+const 4
+ceq
+jmp_false print_inc
+
+get_local 2
+print
+pop
+
+const 6
+print
+pop
+
+print_inc:
+
+get_local 2
+const 2
+add
+set_local 2
+pop
+jmp print_cond
+
+end_sieve:
+
+const 1
+return
+.end_def
