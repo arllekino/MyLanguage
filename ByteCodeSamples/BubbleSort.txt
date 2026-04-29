@@ -1,7 +1,7 @@
 .def
 .argc 0
 .locals 5
-.name BubbleSortStandalone
+.name BubbleSort
 .constants
 number 0
 number 1
@@ -10,49 +10,45 @@ number 2
 number 9
 .code
 
-// --- 1. Создание и заполнение массива [5, 2, 9, 1, 5] ---
 build_array
 set_local 0
 pop
 
-// push(5) - константа 2
+// push(5)
 get_local 0
 const 2
 array_push
 pop
 
-// push(2) - константа 3
+// push(2)
 get_local 0
 const 3
 array_push
 pop
 
-// push(9) - константа 4
+// push(9)
 get_local 0
 const 4
 array_push
 pop
 
-// push(1) - константа 1
+// push(1)
 get_local 0
 const 1
 array_push
 pop
 
-// push(5) - константа 2
+// push(5)
 get_local 0
 const 2
 array_push
 pop
 
-// --- 2. Логика сортировки Bubble Sort ---
-// local 1 = array_len(local 0)
 get_local 0
 array_len
 set_local 1
 pop
 
-// local 2 = 0
 const 0
 set_local 2
 pop
@@ -110,7 +106,7 @@ get_index
 cgt
 jmp_false endif
 
-// Обмен значениями
+// обмен значениями
 get_local 0
 get_local 3
 get_index
@@ -142,7 +138,7 @@ innerend:
 jmp outeraction
 
 outerend:
-// Возврат отсортированного массива
 get_local 0
+print
 return
 .end_def

@@ -17,7 +17,7 @@ inline void PrintValue(const Value& value)
         }
         else if constexpr (std::is_same_v<T, StringPtr>)
         {
-            std::cout << (v ? *v : "nil");
+            std::cout << (v ? *v : "null");
         }
         else if constexpr (std::is_same_v<T, ArrayPtr>)
         {

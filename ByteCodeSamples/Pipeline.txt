@@ -1,0 +1,352 @@
+// Функция Sieve
+.def
+.name Sieve
+.argc 1
+.constants
+number 0
+number 1
+number 2
+true
+false
+.code
+build_array
+set_local 1
+pop
+build_array
+set_local 2
+pop
+
+const 0
+set_local 3
+pop
+fill_cond:
+get_local 3
+get_local 0
+const 2
+add
+clt
+jmp_false fill_end
+get_local 1
+const 3
+array_push
+pop
+get_local 3
+const 1
+add
+set_local 3
+pop
+jmp fill_cond
+fill_end:
+
+// Решето
+const 2
+set_local 3
+pop
+sieve_out_cond:
+get_local 3
+get_local 3
+mul
+get_local 0
+cgt
+jmp_false sieve_out_body
+jmp sieve_out_end
+
+sieve_out_body:
+get_local 1
+get_local 3
+get_index
+const 3
+ceq
+jmp_false sieve_out_inc
+
+get_local 3
+get_local 3
+mul
+set_local 4
+pop
+sieve_in_cond:
+get_local 4
+get_local 0
+cgt
+jmp_false sieve_in_body
+jmp sieve_out_inc
+
+sieve_in_body:
+get_local 1
+get_local 4
+const 4
+set_index
+pop
+get_local 4
+get_local 3
+add
+set_local 4
+pop
+jmp sieve_in_cond
+
+sieve_out_inc:
+get_local 3
+const 1
+add
+set_local 3
+pop
+jmp sieve_out_cond
+sieve_out_end:
+
+const 2
+set_local 3
+pop
+collect_cond:
+get_local 3
+get_local 0
+cgt
+jmp_false collect_body
+jmp collect_end
+
+collect_body:
+get_local 1
+get_local 3
+get_index
+const 3
+ceq
+jmp_false collect_inc
+get_local 2
+get_local 3
+array_push
+pop
+
+collect_inc:
+get_local 3
+const 1
+add
+set_local 3
+pop
+jmp collect_cond
+collect_end:
+
+get_local 2
+return
+.end_def
+
+// Функция Shuffle
+.def
+.name Shuffle
+.argc 1
+.constants
+number 1
+number 0
+string "rand"
+.code
+
+get_local 0
+array_len
+const 0
+sub
+set_local 1
+pop
+
+shuf_cond:
+get_local 1
+const 1
+cgt
+jmp_false shuf_end
+
+get_global 2
+get_local 1
+call 1
+set_local 2
+pop
+
+get_local 0
+get_local 1
+get_index
+set_local 3
+pop
+
+get_local 0
+get_local 1
+get_local 0
+get_local 2
+get_index
+set_index
+pop
+
+get_local 0
+get_local 2
+get_local 3
+set_index
+pop
+
+get_local 1
+const 0
+sub
+set_local 1
+pop
+
+jmp shuf_cond
+shuf_end:
+
+get_local 0
+return
+.end_def
+
+// Функция BubbleSort
+.def
+.name BubbleSort
+.argc 1
+.constants
+number 1
+number 0
+.code
+
+get_local 0
+array_len
+set_local 1
+pop
+
+const 1
+set_local 2
+pop
+
+out_cond:
+get_local 2
+get_local 1
+const 0
+sub
+clt
+jmp_false out_end
+
+const 1
+set_local 3
+pop
+
+in_cond:
+get_local 3
+get_local 1
+get_local 2
+sub
+const 0
+sub
+clt
+jmp_false in_end
+
+get_local 0
+get_local 3
+get_index
+get_local 0
+get_local 3
+const 0
+add
+get_index
+cgt
+jmp_false in_inc
+
+get_local 0
+get_local 3
+get_index
+set_local 4
+pop
+
+get_local 0
+get_local 3
+get_local 0
+get_local 3
+const 0
+add
+get_index
+set_index
+pop
+
+get_local 0
+get_local 3
+const 0
+add
+get_local 4
+set_index
+pop
+
+in_inc:
+get_local 3
+const 0
+add
+set_local 3
+pop
+jmp in_cond
+
+in_end:
+get_local 2
+const 0
+add
+set_local 2
+pop
+jmp out_cond
+
+out_end:
+get_local 0
+return
+.end_def
+
+// main
+.def
+.name main
+.argc 0
+.constants
+number 30
+string "Sieve"
+string "Shuffle"
+string "BubbleSort"
+string "print"
+string "== Before Shuffle =="
+string "== After Shuffle =="
+string "== After Sort =="
+.code
+
+get_global 1
+const 0
+call 1
+set_local 0
+pop
+
+get_global 4
+const 5
+call 1
+pop
+
+get_global 4
+get_local 0
+call 1
+pop
+
+get_global 2 // Shuffle
+get_local 0
+call 1
+pop
+
+get_global 4
+const 6
+call 1
+pop
+
+get_global 4
+get_local 0
+call 1
+pop
+
+get_global 3
+get_local 0
+call 1
+pop
+
+get_global 4
+const 7
+call 1
+pop
+
+get_global 4
+get_local 0
+call 1
+pop
+
+const 1
+return
+.end_def

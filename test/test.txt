@@ -1,0 +1,17 @@
+let a = 15
+let b = 5
+
+if (a > 10) {
+    let result = a + b
+    print("A is greater than 10!")
+    if (result == 20) {
+        print("result == 20")
+    }
+} else if (a == 10) {
+    print("A is exactly 10")
+} else {
+    print("A is smaller than 10")
+}
+// print(result)
+
+// переменная result здесь удаляется из памяти, потому что блок закрылся

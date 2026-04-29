@@ -12,4 +12,10 @@ add_executable(MyLanguage
         src/VirtualMachine/Value/ValueUtilsForLogic.h
         src/VirtualMachine/Value/ValueUtilsForPrint.h
         src/ByteCodeParser.h
+        src/Lexer/Lexer.h
+        src/Lexer/TokenType.h
+        src/Lexer/Token.h
+        src/ASTBuilder/ASTBuilder.h
+        src/ASTBuilder/AST.h
+        src/Compiler/Compiler.h
 )

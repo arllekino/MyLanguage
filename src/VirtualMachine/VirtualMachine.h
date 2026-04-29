@@ -1,12 +1,21 @@
 #pragma once
 #include <iostream>
 #include <vector>
-#include <variant>
-#include "./Value/Value.h"
+#include <random>
+#include <unordered_map>
+#include <stdexcept>
+#include "Value/Value.h"
 #include "OpCode.h"
-#include "./Chunk.h"
-#include "./Value/ValueUtilsForLogic.h"
+#include "Chunk.h"
+#include "Value/ValueUtilsForLogic.h"
 #include "Value/ValueUtilsForPrint.h"
+
+struct CallFrame
+{
+    FunctionPtr function;
+    size_t ip = 0;
+    size_t baseSlot = 0;
+};
 
 class VirtualMachine
 {
@@ -14,390 +23,335 @@ public:
     VirtualMachine()
     {
         m_stack.reserve(STACK_MAX);
+        DefineNativeFunctions();
     }
 
-    void Interpret(Chunk* chunk)
+    void DefineGlobal(const std::string& name, const Value& value)
     {
-        m_currentChunk = chunk;
-        m_ip = 0;
-        m_locals.clear();
-        m_locals.resize(256);
+        m_globals[name] = value;
+    }
 
-        for (size_t i = 0; i < m_stack.size(); ++i)
-        {
-            m_locals[i] = m_stack[i];
-        }
+    void Interpret(FunctionPtr mainFunc)
+    {
         m_stack.clear();
+        m_frames.clear();
+
+        Push(mainFunc);
+
+        CallFrame mainFrame;
+        mainFrame.function = mainFunc;
+        mainFrame.ip = 0;
+        mainFrame.baseSlot = 1;
+        m_frames.push_back(mainFrame);
+
+        for(int i = 0; i < 20; i++) Push(false);
 
         Run();
     }
 
-    void Push(const Value& value) // TODO: убрать из public
-    {
-        m_stack.push_back(value);
-    }
-
 private:
-    static constexpr int STACK_MAX = 256;
+    static constexpr int STACK_MAX = 2048;
 
-    Chunk* m_currentChunk{};
-    size_t m_ip{};
     std::vector<Value> m_stack;
-    std::vector<Value> m_locals;
+    std::vector<CallFrame> m_frames;
+    std::unordered_map<std::string, Value> m_globals;
 
-    uint8_t ReadByte()
-    {
-        return m_currentChunk->code[m_ip++];
+    uint8_t ReadByte() {
+        return m_frames.back().function->chunk->code[m_frames.back().ip++];
     }
 
-    uint16_t ReadShort()
-    {
-        const uint8_t high = ReadByte();
-        const uint8_t low = ReadByte();
+    uint16_t ReadShort() {
+        uint8_t high = ReadByte();
+        uint8_t low = ReadByte();
         return static_cast<uint16_t>((high << 8) | low);
     }
 
-    Value Pop()
-    {
-        const Value val = m_stack.back();
+    Value ReadConstant() {
+        return m_frames.back().function->chunk->constants[ReadByte()];
+    }
+
+    Value Pop() {
+        Value val = m_stack.back();
         m_stack.pop_back();
         return val;
     }
 
+    void Push(const Value& value) {
+        m_stack.push_back(value);
+    }
+
+    template<typename T>
+    T Expect(const Value& val, const std::string& errorMessage)
+    {
+        if (std::holds_alternative<T>(val))
+        {
+            return std::get<T>(val);
+        }
+        throw std::runtime_error("Type mismatch: " + errorMessage);
+    }
+
     void Run()
-{
-    for (;;)
     {
-        switch (const auto opcode = ReadByte())
-        {
-            case OP_RETURN:
+        for (;;) {
+            switch (const auto opcode = ReadByte())
             {
-                if (!m_stack.empty())
+                case OP_CONSTANT:
                 {
-                    const auto result = Pop();
-                    PrintValue(result);
-                    std::cout << std::endl;
+                    Push(ReadConstant());
+                    break;
                 }
-                return;
-            }
+                case OP_GET_GLOBAL:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string name = *Expect<StringPtr>(nameVal, "Global name must be a string");
+                    if (m_globals.contains(name))
+                    {
+                        Push(m_globals[name]);
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Undefined global: " + name);
+                    }
+                    break;
+                }
+                case OP_GET_LOCAL:
+                {
+                    uint8_t slot = ReadByte();
+                    Push(m_stack[m_frames.back().baseSlot + slot]);
+                    break;
+                }
+                case OP_SET_LOCAL:
+                {
+                    uint8_t slot = ReadByte();
+                    m_stack[m_frames.back().baseSlot + slot] = m_stack.back();
+                    break;
+                }
+                case OP_CALL:
+                {
+                    int argCount = ReadByte();
+                    Value callee = m_stack[m_stack.size() - 1 - argCount];
 
-            case OP_ADD:
-            {
-                ExecuteAddOperation();
-                break;
-            }
-            case OP_SUB:
-            {
-                ExecuteSubOperation();
-                break;
-            }
-            case OP_MUL:
-            {
-                ExecuteMulOperation();
-                break;
-            }
-            case OP_DIV:
-            {
-                ExecuteDivOperation();
-                break;
-            }
-            case OP_MOD:
-            {
-                ExecuteModOperation();
-                break;
-            }
-            case OP_NEG:
-            {
-                ExecuteNegOperation();
-                break;
-            }
+                    if (std::holds_alternative<FunctionPtr>(callee))
+                    {
+                        FunctionPtr func = std::get<FunctionPtr>(callee);
+                        if (argCount != func->arity)
+                        {
+                            throw std::runtime_error("Expected " + std::to_string(func->arity) + " args but got " + std::to_string(argCount));
+                        }
+                        CallFrame frame;
+                        frame.function = func;
+                        frame.ip = 0;
+                        frame.baseSlot = m_stack.size() - argCount;
+                        m_frames.push_back(frame);
 
-            case OP_GREATER:
-            {
-                ExecuteOperationGreater();
-                break;
-            }
-            case OP_LESS:
-            {
-                ExecuteOperationLess();
-                break;
-            }
-            case OP_EQUAL:
-            {
-                ExecuteOperationEqual();
-                break;
-            }
-            case OP_NOT:
-            {
-                ExecuteOperationNot();
-                break;
-            }
+                        for(int i = 0; i < 20; i++) Push(false);
+                    }
+                    else if (std::holds_alternative<NativeFnPtr>(callee))
+                    {
+                        NativeFnPtr native = std::get<NativeFnPtr>(callee);
+                        std::vector<Value> args;
+                        args.reserve(argCount);
+                        for (int i = 0; i < argCount; ++i)
+                        {
+                            args.push_back(m_stack[m_stack.size() - argCount + i]);
+                        }
+                        Value result = native->func(args);
+                        m_stack.erase(m_stack.end() - argCount - 1, m_stack.end());
+                        Push(result);
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Can only call functions and native functions.");
+                    }
+                    break;
+                }
+                case OP_RETURN:
+                {
+                    Value result = Pop();
+                    size_t baseSlot = m_frames.back().baseSlot;
+                    m_frames.pop_back();
 
-            case OP_JUMP_IF_FALSE:
-            {
-                ExecuteOperationJumpIfFalse();
-                break;
-            }
-            case OP_JUMP:
-            {
-                ExecuteOperationJump();
-                break;
-            }
-            case OP_LOOP:
-            {
-                ExecuteOperationLoop();
-                break;
-            }
+                    if (m_frames.empty())
+                    {
+                        return;
+                    }
 
-            case OP_GET_LOCAL:
-            {
-                ExecuteOperationGetLocal();
-                break;
-            }
-            case OP_SET_LOCAL:
-            {
-                ExecuteOperationSetLocal();
-                break;
-            }
-            case OP_CONSTANT:
-            {
-                ExecuteOperationConstant();
-                break;
-            }
+                    m_stack.erase(m_stack.begin() + baseSlot - 1, m_stack.end());
+                    Push(result);
+                    break;
+                }
+                case OP_ADD:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l + r);
+                    break;
+                }
+                case OP_SUB:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l - r);
+                    break;
+                }
+                case OP_MUL:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l * r);
+                    break;
+                }
+                case OP_DIV:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l / r);
+                    break;
+                }
+                case OP_MOD:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l % r);
+                    break;
+                }
+                case OP_LESS:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l < r);
+                    break;
+                }
+                case OP_GREATER:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l > r);
+                    break;
+                }
+                case OP_EQUAL:
+                {
+                    const Value r = Pop();
+                    const Value l = Pop();
+                    Push(l == r);
+                    break;
+                }
+                case OP_NOT:
+                {
+                    Value val = Pop();
+                    if (std::holds_alternative<bool>(val))
+                    {
+                        Push(!std::get<bool>(val));
+                    }
+                    else
+                    {
+                        throw std::runtime_error("OP_NOT expects a boolean value");
+                    }
+                    break;
+                }
+                case OP_JUMP_IF_FALSE:
+                {
+                    uint16_t target = ReadShort();
+                    Value cond = Pop();
+                    if (std::holds_alternative<bool>(cond) && !std::get<bool>(cond))
+                    {
+                        m_frames.back().ip = target;
+                    }
+                    break;
+                }
+                case OP_JUMP:
+                {
+                    m_frames.back().ip = ReadShort();
+                    break;
+                }
+                case OP_BUILD_ARRAY:
+                {
+                    Push(std::make_shared<Array>());
+                    break;
+                }
+                case OP_ARRAY_PUSH:
+                {
+                    Value val = Pop();
+                    Value arr = Pop();
+                    auto arrayPtr = Expect<ArrayPtr>(arr, "OP_ARRAY_PUSH expects array");
+                    arrayPtr->values.push_back(val);
+                    Push(val);
+                    break;
+                }
+                case OP_ARRAY_LEN:
+                {
+                    Value arr = Pop();
+                    auto arrayPtr = Expect<ArrayPtr>(arr, "OP_ARRAY_LEN expects array");
+                    Push(static_cast<int64_t>(arrayPtr->values.size()));
+                    break;
+                }
+                case OP_GET_INDEX:
+                {
+                    auto idx = Expect<int64_t>(Pop(), "OP_GET_INDEX expects int64_t as index");
+                    auto arr = Expect<ArrayPtr>(Pop(), "OP_GET_INDEX expects array");
 
-            case OP_BUILD_ARRAY:
-            {
-                ExecuteOperationBuildArray();
-                break;
-            }
-            case OP_GET_INDEX:
-            {
-                ExecuteOperationGetIndex();
-                break;
-            }
-            case OP_SET_INDEX:
-            {
-                ExecuteOperationSetIndex();
-                break;
-            }
-            case OP_ARRAY_LEN:
-            {
-                ExecuteOperationArrayLen();
-                break;
-            }
+                    if (idx < 0 || idx >= arr->values.size())
+                    {
+                        throw std::runtime_error("Array index out of bounds: " + std::to_string(idx));
+                    }
+                    Push(arr->values[idx]);
+                    break;
+                }
+                case OP_SET_INDEX:
+                {
+                    Value val = Pop();
+                    auto idx = Expect<int64_t>(Pop(), "OP_SET_INDEX expects int64_t as index");
+                    auto arr = Expect<ArrayPtr>(Pop(), "OP_SET_INDEX expects array");
 
-            case OP_ARRAY_PUSH:
-            {
-                ExecuteOperationArrayPush();
-                break;
-            }
-            case OP_POP:
-            {
-                Pop();
-                break;
-            }
-            case OP_PRINT:
-            {
-                ExecuteOperationPrint();
-                break;
-            }
-
-            default:
-            {
-                std::cerr << "Unknown opcode: " << static_cast<int>(opcode) << std::endl;
-                return;
+                    if (idx < 0 || idx >= arr->values.size())
+                    {
+                        throw std::runtime_error("Array index out of bounds: " + std::to_string(idx));
+                    }
+                    arr->values[idx] = val;
+                    Push(val);
+                    break;
+                }
+                case OP_POP:
+                {
+                    Pop();
+                    break;
+                }
+                default:
+                    throw std::runtime_error("Unknown opcode: " + std::to_string(opcode));
             }
         }
     }
-}
 
-    void ExecuteAddOperation()
+    void DefineNativeFunctions()
     {
-        const Value left = Pop();
-        const Value right = Pop();
-
-        m_stack.push_back(left + right);
+        DefineNativePrint();
+        DefineNativeRandom();
     }
 
-    void ExecuteOperationConstant()
+    void DefineNative(const std::string& name, std::function<Value(const std::vector<Value>&)> fn)
     {
-        const auto index = ReadByte();
-        Value constant = m_currentChunk->constants[index];
-        Push(constant);
+        auto native = std::make_shared<NativeFunction>();
+        native->func = std::move(fn);
+        m_globals[name] = native;
     }
 
-    void ExecuteOperationGreater()
+    void DefineNativeRandom()
     {
-        const Value right = Pop();
-        const Value left = Pop();
-        Push(left > right);
-    }
-
-    void ExecuteOperationJumpIfFalse()
-    {
-        uint16_t targetAddress = ReadShort();
-
-        if (Value condition = Pop(); std::holds_alternative<bool>(condition))
+        DefineNative("rand", [rng = std::mt19937(std::random_device{}()), this](const std::vector<Value>& args) mutable -> Value
         {
-            if (!std::get<bool>(condition))
-            {
-                m_ip = targetAddress;
-            }
-        }
-        else
+            auto max = Expect<int64_t>(args[0], "rand expects int64_t");
+            std::uniform_int_distribution<int64_t> dist(0, max);
+            return dist(rng);
+        });
+    }
+
+    void DefineNativePrint()
+    {
+        DefineNative("print", [](const std::vector<Value>& args) -> Value
         {
-            throw std::runtime_error("Condition must be a boolean");
-        }
-    }
-    void ExecuteOperationJump()
-    {
-        uint16_t address = ReadShort();
-        m_ip = address;
-    }
-
-    void ExecuteOperationLoop()
-    {
-        uint16_t address = ReadShort();
-        m_ip = address;
-    }
-
-    void ExecuteOperationGetLocal()
-    {
-        uint8_t slot = ReadByte();
-        Push(m_locals[slot]);
-    }
-
-    void ExecuteOperationSetLocal()
-    {
-        uint8_t slot = ReadByte();
-        m_locals[slot] = m_stack.back();
-    }
-
-    void ExecuteOperationGetIndex()
-    {
-        Value indexVal = Pop();
-        Value arrayVal = Pop();
-
-        auto arrayPtr = std::get<ArrayPtr>(arrayVal);
-        int64_t index = std::get<int64_t>(indexVal);
-
-        Push(arrayPtr->values[index]);
-    }
-
-    void ExecuteOperationSetIndex()
-    {
-        Value value = Pop();
-        Value indexVal = Pop();
-        Value arrayVal = Pop();
-
-        auto arrayPtr = std::get<ArrayPtr>(arrayVal);
-        int64_t index = std::get<int64_t>(indexVal);
-
-        arrayPtr->values[index] = value;
-        Push(value);
-    }
-
-    void ExecuteOperationPrint() const
-    {
-        const Value value = m_stack.back();
-        PrintValue(value);
-    }
-
-    void ExecuteSubOperation()
-    {
-        const Value right = Pop();
-        const Value left = Pop();
-        Push(left - right);
-    }
-
-    void ExecuteMulOperation()
-    {
-        const Value right = Pop();
-        const Value left = Pop();
-        Push(left * right);
-    }
-
-    void ExecuteDivOperation()
-    {
-        const Value right = Pop();
-        const Value left = Pop();
-        Push(left / right);
-    }
-
-    void ExecuteModOperation()
-    {
-        const Value right = Pop();
-        const Value left = Pop();
-
-        Push(left % right);
-    }
-
-    void ExecuteNegOperation()
-    {
-        Push(-Pop());
-    }
-
-    void ExecuteOperationLess()
-    {
-        const Value right = Pop();
-        const Value left = Pop();
-        Push(left < right);
-    }
-
-    void ExecuteOperationEqual()
-    {
-        const Value right = Pop();
-        const Value left = Pop();
-        Push(left == right);
-    }
-
-    void ExecuteOperationNot()
-    {
-        const Value val = Pop();
-        if (std::holds_alternative<bool>(val))
-        {
-            Push(!std::get<bool>(val));
-        }
-        else
-        {
-            throw std::invalid_argument("OP_NOT applies only to booleans");
-        }
-    }
-
-    void ExecuteOperationBuildArray()
-    {
-        auto newArray = std::make_shared<Array>();
-        Push(newArray);
-    }
-
-    void ExecuteOperationArrayLen()
-    {
-        const Value val = Pop();
-        if (std::holds_alternative<ArrayPtr>(val))
-        {
-            auto arr = std::get<ArrayPtr>(val);
-            Push(static_cast<int64_t>(arr->values.size()));
-        }
-        else
-        {
-            throw std::invalid_argument("OP_ARRAY_LEN applies only to arrays");
-        }
-    }
-
-    void ExecuteOperationArrayPush()
-    {
-        Value value = Pop();
-        Value arrayVal = Pop();
-
-        if (std::holds_alternative<ArrayPtr>(arrayVal))
-        {
-            auto arrayPtr = std::get<ArrayPtr>(arrayVal);
-            arrayPtr->values.push_back(value);
-            Push(value);
-        }
-        else
-        {
-            throw std::invalid_argument("OP_ARRAY_PUSH applies only to arrays");
-        }
+             PrintValue(args[0]);
+             std::cout << "\n" << std::flush;
+             return false;
+        });
     }
 };

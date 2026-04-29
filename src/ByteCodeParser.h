@@ -1,13 +1,12 @@
 #pragma once
 #include <fstream>
-#include <iostream>
 #include <sstream>
 #include <vector>
 #include <unordered_map>
 #include <stdexcept>
 
 #include "VirtualMachine/OpCode.h"
-#include "VirtualMachine/Chunk.h"
+#include "VirtualMachine/VirtualMachine.h"
 
 class ByteCodeParser
 {
@@ -16,13 +15,12 @@ public:
     {
         m_file.open(filename);
         if (!m_file.is_open())
-        {
             throw std::runtime_error("Could not open file: " + filename);
-        }
     }
 
-    Chunk Parse()
+    std::vector<FunctionPtr> Parse()
     {
+        std::vector<FunctionPtr> functions;
         std::string line;
 
         while (std::getline(m_file, line))
@@ -33,6 +31,21 @@ public:
             std::string token;
             iss >> token;
 
+            if (token == ".def")
+            {
+                ResetState();
+                continue;
+            }
+            if (token == ".name")
+            {
+                iss >> m_currentFunction->name;
+                continue;
+            }
+            if (token == ".argc")
+            {
+                iss >> m_currentFunction->arity;
+                continue;
+            }
             if (token == ".constants")
             {
                 m_state = ParserState::Constants;
@@ -45,11 +58,9 @@ public:
             }
             if (token == ".end_def")
             {
-                break;
-            }
-            if (token.starts_with("."))
-            {
-                continue; // for a moment ignore .def, .argc, .locals, .name
+                BackpatchJumps();
+                functions.push_back(m_currentFunction);
+                continue;
             }
 
             if (m_state == ParserState::Constants)
@@ -62,21 +73,51 @@ public:
             }
         }
 
-        BackpatchJumps();
-        return std::move(m_chunk);
+        return functions;
     }
 
 private:
     enum class ParserState { Init, Constants, Code };
 
     std::ifstream m_file;
-    Chunk m_chunk;
     ParserState m_state = ParserState::Init;
 
+    FunctionPtr m_currentFunction;
     std::unordered_map<std::string, uint16_t> m_labels;
     std::vector<std::pair<size_t, std::string>> m_unresolvedJumps;
 
-    void ParseConstant(const std::string& type, std::istringstream& iss)
+    void ResetState()
+    {
+        m_currentFunction = std::make_shared<Function>();
+        m_currentFunction->chunk = std::make_unique<Chunk>();
+        m_labels.clear();
+        m_unresolvedJumps.clear();
+        m_state = ParserState::Init;
+    }
+
+    static std::string UnescapeString(const std::string& s)
+    {
+        std::string res;
+        for (size_t i = 0; i < s.size(); ++i)
+        {
+            if (s[i] == '\\' && i + 1 < s.size())
+            {
+                char c = s[++i];
+                if (c == 'n') res += '\n';
+                else if (c == 't') res += '\t';
+                else if (c == '"') res += '"';
+                else if (c == '\\') res += '\\';
+                else res += c;
+            }
+            else
+            {
+                res += s[i];
+            }
+        }
+        return res;
+    }
+
+    void ParseConstant(const std::string& type, std::istringstream& iss) const
     {
         std::string valueStr;
         std::getline(iss >> std::ws, valueStr);
@@ -85,11 +126,11 @@ private:
         {
             if (valueStr.find('.') != std::string::npos)
             {
-                m_chunk.constants.emplace_back(std::stod(valueStr));
+                m_currentFunction->chunk->constants.emplace_back(std::stod(valueStr));
             }
             else
             {
-                m_chunk.constants.emplace_back(std::stoll(valueStr));
+                m_currentFunction->chunk->constants.emplace_back(std::stoll(valueStr));
             }
         }
         else if (type == "string")
@@ -98,13 +139,16 @@ private:
             {
                 valueStr = valueStr.substr(1, valueStr.size() - 2);
             }
-            m_chunk.constants.emplace_back(std::make_shared<std::string>(valueStr));
+            valueStr = UnescapeString(valueStr);
+            m_currentFunction->chunk->constants.emplace_back(std::make_shared<std::string>(valueStr));
         }
-        else if (type == "true")  { m_chunk.constants.emplace_back(true); }
-        else if (type == "false") { m_chunk.constants.emplace_back(false); }
-        else
+        else if (type == "true")
         {
-            std::cerr << "Unknown constant type: " << type << std::endl;
+            m_currentFunction->chunk->constants.emplace_back(true);
+        }
+        else if (type == "false")
+        {
+            m_currentFunction->chunk->constants.emplace_back(false);
         }
     }
 
@@ -112,106 +156,94 @@ private:
     {
         if (token.back() == ':')
         {
-            std::string labelName = token.substr(0, token.size() - 1);
-            m_labels[labelName] = static_cast<uint16_t>(m_chunk.code.size());
+            m_labels[token.substr(0, token.size() - 1)] = static_cast<uint16_t>(m_currentFunction->chunk->code.size());
             return;
         }
 
-        const std::string& opcode = token;
+        auto& code = m_currentFunction->chunk->code;
 
-        if (opcode == "const" || opcode == "set_local" || opcode == "get_local")
+        if (token == "const" || token == "set_local" || token == "get_local" || token == "get_global")
         {
             int arg; iss >> arg;
-            uint8_t code = (opcode == "const") ? OP_CONSTANT :
-                           (opcode == "set_local") ? OP_SET_LOCAL : OP_GET_LOCAL;
-
-            m_chunk.code.push_back(code);
-            m_chunk.code.push_back(static_cast<uint8_t>(arg));
+            uint8_t op = (token == "const") ? OP_CONSTANT :
+                         (token == "get_global") ? OP_GET_GLOBAL :
+                         (token == "set_local") ? OP_SET_LOCAL : OP_GET_LOCAL;
+            code.push_back(op);
+            code.push_back(static_cast<uint8_t>(arg));
         }
-        else if (opcode == "jmp" || opcode == "jmp_false" || opcode == "loop")
+        else if (token == "call")
         {
-            std::string labelName;
-            iss >> labelName;
-
-            uint8_t code = (opcode == "jmp")
-                ? OP_JUMP
-                : (opcode == "loop")
-                    ? OP_LOOP
-                    : OP_JUMP_IF_FALSE;
-
-            m_chunk.code.push_back(code);
-            m_unresolvedJumps.emplace_back(m_chunk.code.size(), labelName);
-
-            m_chunk.code.push_back(0);
-            m_chunk.code.push_back(0);
+            int argc;
+            iss >> argc;
+            code.push_back(OP_CALL);
+            code.push_back(static_cast<uint8_t>(argc));
         }
-        else if (opcode == "add")
+        else if (token == "jmp" || token == "jmp_false")
         {
-            m_chunk.code.push_back(OP_ADD);
+            std::string label; iss >> label;
+            code.push_back(token == "jmp" ? OP_JUMP : OP_JUMP_IF_FALSE);
+            m_unresolvedJumps.emplace_back(code.size(), label);
+            code.push_back(0); code.push_back(0);
         }
-        else if (opcode == "mul")
+        else if (token == "add")
         {
-            m_chunk.code.push_back(OP_MUL);
+            code.push_back(OP_ADD);
         }
-        else if (opcode == "div")
+        else if (token == "sub")
         {
-            m_chunk.code.push_back(OP_DIV);
+            code.push_back(OP_SUB);
         }
-        else if (opcode == "mod")
+        else if (token == "mul")
         {
-            m_chunk.code.push_back(OP_MOD);
+            code.push_back(OP_MUL);
         }
-        else if (opcode == "sub")
+        else if (token == "div")
         {
-            m_chunk.code.push_back(OP_SUB);
+            code.push_back(OP_DIV);
         }
-        else if (opcode == "clt")
+        else if (token == "mod")
         {
-            m_chunk.code.push_back(OP_LESS);
+            code.push_back(OP_MOD);
         }
-        else if (opcode == "cgt")
+        else if (token == "clt")
         {
-            m_chunk.code.push_back(OP_GREATER);
+            code.push_back(OP_LESS);
         }
-        else if (opcode == "ceq")
+        else if (token == "cgt")
         {
-            m_chunk.code.push_back(OP_EQUAL);
+            code.push_back(OP_GREATER);
         }
-        else if (opcode == "get_index")
+        else if (token == "ceq")
         {
-            m_chunk.code.push_back(OP_GET_INDEX);
+            code.push_back(OP_EQUAL);
         }
-        else if (opcode == "set_index")
+        else if (token == "build_array")
         {
-            m_chunk.code.push_back(OP_SET_INDEX);
+            code.push_back(OP_BUILD_ARRAY);
         }
-        else if (opcode == "build_array")
+        else if (token == "array_push")
         {
-            m_chunk.code.push_back(OP_BUILD_ARRAY);
+            code.push_back(OP_ARRAY_PUSH);
         }
-        else if (opcode == "array_len")
+        else if (token == "array_len")
         {
-            m_chunk.code.push_back(OP_ARRAY_LEN);
+            code.push_back(OP_ARRAY_LEN);
         }
-        else if (opcode == "array_push")
+        else if (token == "get_index")
         {
-            m_chunk.code.push_back(OP_ARRAY_PUSH);
+            code.push_back(OP_GET_INDEX);
         }
-        else if (opcode == "pop")
+        else if (token == "set_index")
         {
-            m_chunk.code.push_back(OP_POP);
+            code.push_back(OP_SET_INDEX);
         }
-        else if (opcode == "print")
+        else if (token == "pop")
         {
-            m_chunk.code.push_back(OP_PRINT);
+            code.push_back(OP_POP);
         }
-        else if (opcode == "return")
+        else if (token == "return")
         {
-            m_chunk.code.push_back(OP_RETURN);
-        }
-        else
-        {
-            std::cerr << "Unknown opcode: " << opcode << std::endl;
+            code.push_back(OP_RETURN);
         }
     }
 
@@ -219,15 +251,9 @@ private:
     {
         for (const auto& [offset, labelName] : m_unresolvedJumps)
         {
-            if (!m_labels.contains(labelName))
-            {
-                throw std::runtime_error("Unknown label: " + labelName);
-            }
-
             uint16_t address = m_labels[labelName];
-
-            m_chunk.code[offset] = (address >> 8) & 0xFF;
-            m_chunk.code[offset + 1] = address & 0xFF;
+            m_currentFunction->chunk->code[offset] = (address >> 8) & 0xFF;
+            m_currentFunction->chunk->code[offset + 1] = address & 0xFF;
         }
     }
 };

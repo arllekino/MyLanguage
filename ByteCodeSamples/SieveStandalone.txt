@@ -3,12 +3,12 @@
 .locals 5
 .name SieveStandalone
 .constants
-number 50   // 0: N = 50
-number 0    // 1: 0
-number 1    // 2: 1
-false       // 3: false
-true        // 4: true
-number 2    // 5: 2
+number 50
+number 0
+number 1
+false
+true
+number 2
 string " "
 .code
 
