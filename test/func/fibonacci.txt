@@ -1,3 +1,56 @@
+class Matrix2x2 {
+    let data: [Double]
+
+    init(m00: Double, m01: Double, m10: Double, m11: Double) {
+        self.data = [m00, m01, m10, m11]
+    }
+
+    func add(other: Matrix2x2): Matrix2x2 {
+        return Matrix2x2(
+            self.data[0] + other.data[0],
+            self.data[1] + other.data[1],
+            self.data[2] + other.data[2],
+            self.data[3] + other.data[3]
+        )
+    }
+
+    func multiply(other: Matrix2x2): Matrix2x2 {
+        return Matrix2x2(
+            self.data[0] * other.data[0] + self.data[1] * other.data[2],
+            self.data[0] * other.data[1] + self.data[1] * other.data[3],
+            self.data[2] * other.data[0] + self.data[3] * other.data[2],
+            self.data[2] * other.data[1] + self.data[3] * other.data[3]
+        )
+    }
+
+    func multiplyCoef(coef: Int): Matrix2x2 {
+        return Matrix2x2(
+            self.data[0] * coef,
+            self.data[1] * coef,
+            self.data[2] * coef,
+            self.data[3] * coef
+        )
+    }
+
+    func determinant(): Double {
+        return self.data[0] * self.data[3] - self.data[1] * self.data[2]
+    }
+
+    func transpose(): Matrix2x2 {
+        return Matrix2x2(
+            self.data[0], self.data[2],
+            self.data[1], self.data[3]
+        )
+    }
+
+    func printMatrix(): Void {
+        for (let i = 0; i < 4; i = i + 1) {
+            print(self.data[i])
+        }
+
+    }
+}
+
 func fibonacci(n: Int): Int {
     if (n <= 1) {
         return n
@@ -5,11 +58,20 @@ func fibonacci(n: Int): Int {
     return fibonacci(n - 1) + fibonacci(n - 2)
 }
 
-func greet(name: String): Void {
-    print("Welcome " + name)
-}
-
-greet("Compiler Engineer")
-
 let fib10: Int = fibonacci(10)
-print(fib10) // 55
+// print(fib10) // 55
+
+let fib5: Int = fibonacci(6)
+// print(fib5) // 55
+
+let a = 7
+let c = fibonacci(a)
+print(c)
+
+let matrixB = Matrix2x2(1.5, 1.8, 2.5, 2.8)
+let matrixD = matrixB.multiplyCoef(c)
+matrixD.printMatrix()
+
+let matrixB = matrixB.multiply(matrixD)
+
+matrixB.printMatrix()

@@ -8,6 +8,7 @@
 #include "Compiler/ByteCodeExporter.h"
 #include "VirtualMachine/ByteCodeParser.h"
 #include "VirtualMachine/VirtualMachine.h"
+#include "ASM/ASMGenerator.h"
 
 int main(int argc, char *argv[])
 {
@@ -36,14 +37,17 @@ int main(int argc, char *argv[])
             ASTBuilder parser(tokens);
             auto ast = parser.Parse();
 
-            Compiler compiler;
-            FunctionPtr compiledFunc = compiler.Compile(ast);
+            ASMGenerator asmGenerator;
+            asmGenerator.CompileAndRun(ast, filename + "output.s");
 
-            std::string bcFilename = filename.substr(0, filename.find_last_of('.')) + ".bc";
-            ByteCodeExporter exporter;
-            exporter.Export(compiledFunc, bcFilename);
-
-            filename = bcFilename;
+            // Compiler compiler;
+            // FunctionPtr compiledFunc = compiler.Compile(ast);
+            //
+            // std::string bcFilename = filename.substr(0, filename.find_last_of('.')) + ".bc";
+            // ByteCodeExporter exporter;
+            // exporter.Export(compiledFunc, bcFilename);
+            //
+            // filename = bcFilename;
         }
 
         if (filename.ends_with(".bc"))
