@@ -1,0 +1,10 @@
+let numbers: Array = [10, 20, 30, 40]
+
+print(numbers[0])
+print(numbers[3])
+
+numbers[1] = 99
+print(numbers[1])
+
+let result: Int = numbers[0] + numbers[2]
+print(result) // 40

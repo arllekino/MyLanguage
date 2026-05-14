@@ -1,0 +1,20 @@
+let counter = 0
+const maxLimit = 3
+
+func increment() {
+    print("Old counter:")
+    print(counter)
+
+    counter = counter + 1
+
+    print("New counter:")
+    print(counter)
+    print("-----")
+}
+
+while (counter < maxLimit) {
+    increment()
+}
+
+print("Final counter:")
+print(counter)

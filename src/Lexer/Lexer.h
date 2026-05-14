@@ -113,6 +113,9 @@ private:
         {"self", TokenType::KEYWORD}, {"Self", TokenType::KEYWORD},
         {"throw", TokenType::KEYWORD},
         {"super", TokenType::KEYWORD},
+        {"return", TokenType::KEYWORD},
+        {"weak", TokenType::KEYWORD},
+        {"true", TokenType::KEYWORD}, {"false", TokenType::KEYWORD}
     };
 
     [[nodiscard]] char Peek() const

@@ -1,0 +1,3 @@
+let anyVar: Any
+
+print(anyVar)

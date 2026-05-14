@@ -1,0 +1,16 @@
+let arr = [10, 20, 30]
+
+print("Массив до изменения:")
+print(arr)
+
+arr[1] = 99
+
+print("Массив после изменения:")
+print(arr)
+
+print("Запуск цикла")
+let i = 0
+while (i < 3) {
+    print(arr[i])
+    i = i + 1
+}

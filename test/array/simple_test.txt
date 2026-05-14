@@ -1,0 +1,7 @@
+let arr = [10, 20, 30]
+
+let i = 2
+while (i >= 0) {
+    print(arr[i])
+    i = i - 1
+}

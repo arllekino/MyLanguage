@@ -1,0 +1,8 @@
+class Person {
+    func sayHello() {
+        print("Hello from method!")
+    }
+}
+
+let p = Person()
+p.sayHello()

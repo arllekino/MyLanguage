@@ -1,0 +1,17 @@
+let i: Int = 0
+let sum: Int = 0
+
+while (i < 5) {
+    if (i == 2) {
+        print("halfway")
+    } else if (i == 4) {
+        print("almost done")
+    } else {
+        print(i)
+    }
+
+    sum = sum + i
+    i = i + 1
+}
+
+print(sum) // 10

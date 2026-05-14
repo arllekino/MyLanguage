@@ -20,6 +20,14 @@ inline Value operator+(const Value& lhs, const Value& rhs)
             using ResultType = std::common_type_t<L, R>;
             return static_cast<ResultType>(l + r);
         }
+        else if constexpr (std::is_same_v<L, StringPtr> && std::is_same_v<R, StringPtr>)
+        {
+            if (l && r)
+            {
+                return std::make_shared<std::string>(*l + *r);
+            }
+            throw std::invalid_argument("Cannot concatenate null strings");
+        }
         else
         {
             throw std::invalid_argument("Cannot add values of different types");
@@ -164,7 +172,22 @@ inline bool operator==(const Value& lhs, const Value& rhs)
 
         if constexpr (std::is_same_v<L, R>)
         {
-            return l == r;
+            if constexpr (std::is_same_v<L, StringPtr>)
+            {
+                if (!l && !r)
+                {
+                    return true;
+                }
+                if (!l || !r)
+                {
+                    return false;
+                }
+                return *l == *r;
+            }
+            else
+            {
+                return l == r;
+            }
         }
         else
         {

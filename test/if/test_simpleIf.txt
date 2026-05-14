@@ -1,0 +1,8 @@
+const a = 5
+const b: Double = 3.0
+
+const boo: Bool = true
+print(boo)
+if (a == 5) {
+    print("a == 5")
+}

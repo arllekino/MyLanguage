@@ -41,42 +41,55 @@ public:
         CallFrame mainFrame;
         mainFrame.function = mainFunc;
         mainFrame.ip = 0;
-        mainFrame.baseSlot = 1;
+        mainFrame.baseSlot = 0;
         m_frames.push_back(mainFrame);
 
-        for(int i = 0; i < 20; i++) Push(false);
+        for(int i = 0; i < mainFunc->maxLocals - 1; i++)
+        {
+            Push(Null{});
+        }
 
         Run();
     }
 
 private:
     static constexpr int STACK_MAX = 2048;
+    static constexpr int FRAMES_MAX = 64; // убрать?
 
     std::vector<Value> m_stack;
     std::vector<CallFrame> m_frames;
     std::unordered_map<std::string, Value> m_globals;
 
-    uint8_t ReadByte() {
+    uint8_t ReadByte()
+    {
         return m_frames.back().function->chunk->code[m_frames.back().ip++];
     }
 
-    uint16_t ReadShort() {
+    uint16_t ReadShort()
+    {
         uint8_t high = ReadByte();
         uint8_t low = ReadByte();
         return static_cast<uint16_t>((high << 8) | low);
     }
 
-    Value ReadConstant() {
+    Value ReadConstant()
+    {
         return m_frames.back().function->chunk->constants[ReadByte()];
     }
 
-    Value Pop() {
+    Value Pop()
+    {
         Value val = m_stack.back();
         m_stack.pop_back();
         return val;
     }
 
-    void Push(const Value& value) {
+    void Push(const Value& value)
+    {
+        if (m_stack.size() >= STACK_MAX)
+        {
+            throw std::runtime_error("Stack overflow: exceeded maximum stack size.");
+        }
         m_stack.push_back(value);
     }
 
@@ -88,6 +101,32 @@ private:
             return std::get<T>(val);
         }
         throw std::runtime_error("Type mismatch: " + errorMessage);
+    }
+
+    static InstancePtr GetStrongInstance(const Value& value, const std::string& errorMsg)
+    {
+        if (std::holds_alternative<InstancePtr>(value))
+        {
+            return std::get<InstancePtr>(value);
+        }
+        if (std::holds_alternative<WeakInstancePtr>(value))
+        {
+            auto weakPtr = std::get<WeakInstancePtr>(value);
+            if (auto shared = weakPtr.lock())
+            {
+                return shared;
+            }
+            throw std::runtime_error("Fatal Error: Attempted to access a deallocated weak reference.");
+        }
+        throw std::runtime_error("Type mismatch: " + errorMsg);
+    }
+
+    static void CheckOperandsNotNil(const Value& l, const Value& r, const std::string& opName)
+    {
+        if (std::holds_alternative<Null>(l) || std::holds_alternative<Null>(r))
+        {
+            throw std::runtime_error("Runtime Error: Cannot perform '" + opName + "' operation with a Nil value.");
+        }
     }
 
     void Run()
@@ -114,6 +153,27 @@ private:
                     }
                     break;
                 }
+                case OP_DEFINE_GLOBAL:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string name = *Expect<StringPtr>(nameVal, "Global name must be a string");
+                    m_globals[name] = Pop();
+                    break;
+                }
+                case OP_SET_GLOBAL:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string name = *Expect<StringPtr>(nameVal, "Global name must be a string");
+                    if (m_globals.contains(name))
+                    {
+                        m_globals[name] = m_stack.back();
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Undefined global: " + name);
+                    }
+                    break;
+                }
                 case OP_GET_LOCAL:
                 {
                     uint8_t slot = ReadByte();
@@ -131,6 +191,11 @@ private:
                     int argCount = ReadByte();
                     Value callee = m_stack[m_stack.size() - 1 - argCount];
 
+                    if (m_frames.size() >= FRAMES_MAX)
+                    {
+                        throw std::runtime_error("Stack overflow: maximum call frame depth exceeded.");
+                    }
+
                     if (std::holds_alternative<FunctionPtr>(callee))
                     {
                         FunctionPtr func = std::get<FunctionPtr>(callee);
@@ -141,10 +206,33 @@ private:
                         CallFrame frame;
                         frame.function = func;
                         frame.ip = 0;
-                        frame.baseSlot = m_stack.size() - argCount;
+                        frame.baseSlot = m_stack.size() - 1 - argCount;
                         m_frames.push_back(frame);
 
-                        for(int i = 0; i < 20; i++) Push(false);
+                        int localsToAllocate = func->maxLocals - argCount - 1;
+                        for(int i = 0; i < localsToAllocate; i++)
+                        {
+                            Push(Null{});
+                        }
+                    }
+                    else if (std::holds_alternative<BoundMethodPtr>(callee))
+                    {
+                        BoundMethodPtr bound = std::get<BoundMethodPtr>(callee);
+                        if (argCount != bound->method->arity)
+                        {
+                            throw std::runtime_error("Expected " + std::to_string(bound->method->arity) + " args but got " + std::to_string(argCount));
+                        }
+
+                        m_stack[m_stack.size() - 1 - argCount] = bound->receiver;
+
+                        CallFrame frame;
+                        frame.function = bound->method;
+                        frame.ip = 0;
+                        frame.baseSlot = m_stack.size() - 1 - argCount;
+                        m_frames.push_back(frame);
+
+                        int localsToAllocate = bound->method->maxLocals - argCount - 1;
+                        for(int i = 0; i < localsToAllocate; i++) Push(false);
                     }
                     else if (std::holds_alternative<NativeFnPtr>(callee))
                     {
@@ -158,6 +246,39 @@ private:
                         Value result = native->func(args);
                         m_stack.erase(m_stack.end() - argCount - 1, m_stack.end());
                         Push(result);
+                    }
+                    else if (std::holds_alternative<KlassPtr>(callee))
+                    {
+                        KlassPtr klass = std::get<KlassPtr>(callee);
+                        auto instance = std::make_shared<Instance>();
+                        instance->klass = klass;
+
+                        m_stack[m_stack.size() - 1 - argCount] = instance;
+
+                        if (klass->methods.contains("init"))
+                        {
+                            FunctionPtr initMethod = klass->methods["init"];
+                            if (argCount != initMethod->arity)
+                            {
+                                throw std::runtime_error("Expected " + std::to_string(initMethod->arity) + " arguments for init(), got " + std::to_string(argCount));
+                            }
+
+                            CallFrame frame;
+                            frame.function = initMethod;
+                            frame.ip = 0;
+                            frame.baseSlot = m_stack.size() - 1 - argCount;
+                            m_frames.push_back(frame);
+
+                            int localsToAllocate = initMethod->maxLocals - argCount - 1;
+                            for(int i = 0; i < localsToAllocate; i++) Push(false);
+                        }
+                        else
+                        {
+                            if (argCount != 0)
+                            {
+                                throw std::runtime_error("Class '" + klass->name + "' has no init() method, but arguments were provided.");
+                            }
+                        }
                     }
                     else
                     {
@@ -176,7 +297,7 @@ private:
                         return;
                     }
 
-                    m_stack.erase(m_stack.begin() + baseSlot - 1, m_stack.end());
+                    m_stack.erase(m_stack.begin() + baseSlot, m_stack.end());
                     Push(result);
                     break;
                 }
@@ -184,6 +305,7 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
+                    CheckOperandsNotNil(l, r, "+");
                     Push(l + r);
                     break;
                 }
@@ -191,6 +313,7 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
+                    CheckOperandsNotNil(l, r, "-");
                     Push(l - r);
                     break;
                 }
@@ -198,6 +321,7 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
+                    CheckOperandsNotNil(l, r, "*");
                     Push(l * r);
                     break;
                 }
@@ -205,6 +329,7 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
+                    CheckOperandsNotNil(l, r, "/");
                     Push(l / r);
                     break;
                 }
@@ -212,6 +337,7 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
+                    CheckOperandsNotNil(l, r, "%");
                     Push(l % r);
                     break;
                 }
@@ -219,6 +345,7 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
+                    CheckOperandsNotNil(l, r, "<");
                     Push(l < r);
                     break;
                 }
@@ -226,6 +353,7 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
+                    CheckOperandsNotNil(l, r, ">");
                     Push(l > r);
                     break;
                 }
@@ -272,10 +400,10 @@ private:
                 case OP_ARRAY_PUSH:
                 {
                     Value val = Pop();
-                    Value arr = Pop();
+                    Value arr = m_stack.back();
+
                     auto arrayPtr = Expect<ArrayPtr>(arr, "OP_ARRAY_PUSH expects array");
                     arrayPtr->values.push_back(val);
-                    Push(val);
                     break;
                 }
                 case OP_ARRAY_LEN:
@@ -316,6 +444,174 @@ private:
                     Pop();
                     break;
                 }
+                case OP_CLASS:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string className = *std::get<StringPtr>(nameVal);
+
+                    auto klass = std::make_shared<Klass>();
+                    klass->name = className;
+
+                    Push(klass);
+                    break;
+                }
+                case OP_FIELD:
+                {
+                    Value fieldNameVal = ReadConstant();
+                    std::string fieldName = *std::get<StringPtr>(fieldNameVal);
+
+                    Value klassVal = m_stack.back();
+                    auto klass = Expect<KlassPtr>(klassVal, "OP_FIELD expects a class");
+
+                    klass->fields.push_back(fieldName);
+                    break;
+                }
+                case OP_METHOD:
+                {
+                    Value methodNameVal = ReadConstant();
+                    std::string methodName = *std::get<StringPtr>(methodNameVal);
+
+                    Value klassVal = Pop();
+                    Value methodVal = Pop();
+
+                    auto klass = Expect<KlassPtr>(klassVal, "OP_METHOD expects a class");
+                    auto method = Expect<FunctionPtr>(methodVal, "OP_METHOD expects a function");
+
+                    klass->methods[methodName] = method;
+                    break;
+                }
+                case OP_GET_PROPERTY:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string propName = *std::get<StringPtr>(nameVal);
+
+                    Value instanceVal = m_stack.back();
+                    auto instance = GetStrongInstance(instanceVal, "Only instances have properties.");
+
+                    bool isField = false;
+                    for (const auto& field : instance->klass->fields)
+                    {
+                        if (field == propName)
+                        {
+                            isField = true;
+                            break;
+                        }
+                    }
+
+                    if (isField)
+                    {
+                        Pop();
+                        if (instance->fields.contains(propName))
+                        {
+                            Push(instance->fields[propName]);
+                        }
+                        else
+                        {
+                            Push(false);
+                        }
+                    }
+                    else if (instance->klass->methods.contains(propName))
+                    {
+                        Pop();
+                        auto boundMethod = std::make_shared<BoundMethod>();
+                        boundMethod->receiver = instance;
+                        boundMethod->method = instance->klass->methods[propName];
+                        Push(boundMethod);
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Undefined property or method '" + propName + "' on instance.");
+                    }
+                    break;
+                }
+                case OP_SET_PROPERTY:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string propName = *std::get<StringPtr>(nameVal);
+
+                    Value valueToSet = Pop();
+                    Value instanceVal = Pop();
+                    auto instance = GetStrongInstance(instanceVal, "Only instances have properties.");
+
+                    bool fieldExists = false;
+                    for (const auto& field : instance->klass->fields)
+                    {
+                        if (field == propName)
+                        {
+                            fieldExists = true;
+                            break;
+                        }
+                    }
+                    if (!fieldExists)
+                    {
+                        throw std::runtime_error("Error: Class '" + instance->klass->name + "' has no property '" + propName + "'.");
+                    }
+
+                    instance->fields[propName] = valueToSet;
+                    Push(valueToSet);
+                    break;
+                }
+                case OP_SET_PROPERTY_WEAK:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string propName = *std::get<StringPtr>(nameVal);
+
+                    Value valueToSet = Pop();
+                    Value instanceVal = Pop();
+                    auto instance = GetStrongInstance(instanceVal, "Only instances have properties.");
+
+                    bool fieldExists = false;
+                    for (const auto& field : instance->klass->fields)
+                    {
+                        if (field == propName)
+                        {
+                            fieldExists = true;
+                            break;
+                        }
+                    }
+                    if (!fieldExists)
+                    {
+                        throw std::runtime_error("Error: Class '" + instance->klass->name + "' has no property '" + propName + "'.");
+                    }
+
+                    if (std::holds_alternative<InstancePtr>(valueToSet))
+                    {
+                        instance->fields[propName] = WeakInstancePtr(std::get<InstancePtr>(valueToSet));
+                    }
+                    else if (std::holds_alternative<Null>(valueToSet))
+                    {
+                        instance->fields[propName] = valueToSet;
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Fatal: Attempted to assign a non-instance value to a weak property.");
+                    }
+
+                    Push(valueToSet);
+                    break;
+                }
+                case OP_AND:
+                {
+                    Value r = Pop();
+                    Value l = Pop();
+
+                    bool rightBool = std::holds_alternative<bool>(r) ? std::get<bool>(r) : false;
+                    bool leftBool = std::holds_alternative<bool>(l) ? std::get<bool>(l) : false;
+
+                    Push(leftBool && rightBool);
+                    break;
+                }
+                case OP_OR:
+                {
+                    Value r = Pop();
+                    Value l = Pop();
+
+                    bool rightBool = std::holds_alternative<bool>(r) ? std::get<bool>(r) : false;
+                    bool leftBool = std::holds_alternative<bool>(l) ? std::get<bool>(l) : false;
+
+                    Push(leftBool || rightBool);
+                    break;
+                }
                 default:
                     throw std::runtime_error("Unknown opcode: " + std::to_string(opcode));
             }
@@ -326,6 +622,7 @@ private:
     {
         DefineNativePrint();
         DefineNativeRandom();
+        DefineNativeRead();
     }
 
     void DefineNative(const std::string& name, std::function<Value(const std::vector<Value>&)> fn)
@@ -352,6 +649,16 @@ private:
              PrintValue(args[0]);
              std::cout << "\n" << std::flush;
              return false;
+        });
+    }
+
+    void DefineNativeRead()
+    {
+        DefineNative("read", [](const std::vector<Value>& args) -> Value
+        {
+            std::string input;
+            std::getline(std::cin, input);
+            return std::make_shared<std::string>(input);
         });
     }
 };

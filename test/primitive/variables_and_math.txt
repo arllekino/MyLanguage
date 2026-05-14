@@ -1,0 +1,16 @@
+let a: Int = 10
+const b: Int = 20
+let c: Int = a + b * 2
+print(c)
+
+let d: Double = 3.14
+let e: Double = 2.0
+print(d * e)
+
+let s1: String = "Hello, "
+let s2: String = "World!"
+print(s1 + s2)
+
+let isTrue: Bool = true
+let isFalse: Bool = false
+print(isTrue || isFalse)

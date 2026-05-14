@@ -11,6 +11,10 @@ enum OpCode : uint8_t
     OP_GET_LOCAL,
     OP_SET_LOCAL,
     OP_GET_GLOBAL,
+    OP_SET_GLOBAL,
+    OP_DEFINE_GLOBAL,
+
+    OP_AND, OP_OR,
 
     OP_BUILD_ARRAY,
     OP_GET_INDEX,
@@ -19,6 +23,14 @@ enum OpCode : uint8_t
     OP_ARRAY_PUSH, OP_POP,
 
     OP_CALL,
+
+    OP_SET_PROPERTY_WEAK,
+
+    OP_CLASS,
+    OP_FIELD,
+    OP_METHOD,
+    OP_GET_PROPERTY,
+    OP_SET_PROPERTY,
 
     OP_RETURN = 255
 };

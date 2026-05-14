@@ -1,0 +1,4 @@
+class Person {
+    let name = "Unknown"
+    let age = 0
+}

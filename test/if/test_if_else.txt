@@ -1,0 +1,8 @@
+let name: String = "Language"
+
+name = "My" + name
+if (name == "Language") {
+    print("true")
+} else {
+    print("false")
+}

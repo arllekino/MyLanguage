@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include "../ASTBuilder/AST.h"
+#include "../Utils/TypeInfo.h"
 #include "../VirtualMachine/VirtualMachine.h"
 #include "../VirtualMachine/OpCode.h"
 
@@ -12,13 +13,13 @@ class Compiler
 public:
     Compiler()
     {
-        m_mainFunc = std::make_shared<Function>();
-        m_mainFunc->name = "main";
-        m_mainFunc->chunk = std::make_unique<Chunk>();
+        m_functions["print"] = { TypeInfo::Simple(TypeKind::Void), { TypeInfo::Simple(TypeKind::Any) } };
     }
 
     FunctionPtr Compile(const std::vector<std::unique_ptr<Stmt>>& ast)
     {
+        InitState("main", 0, TypeInfo::Simple(TypeKind::Void));
+
         for (const auto& stmt : ast)
         {
             CompileStmt(stmt.get());
@@ -28,32 +29,133 @@ public:
         Emit(MakeConstant(0));
         Emit(OP_RETURN);
 
-        return m_mainFunc;
+        return EndState();
     }
 
 private:
-    FunctionPtr m_mainFunc;
-
-    struct Local {
+    struct Local
+    {
         std::string name;
         int depth;
+        bool isConst;
+        TypeInfoPtr type;
     };
 
-    std::vector<Local> m_locals;
-    int m_scopeDepth = 0;
+    struct CompilerState
+    {
+        FunctionPtr function;
+        std::vector<Local> locals;
+        int maxLocals = 0;
+        int scopeDepth = 0;
+        TypeInfoPtr returnType;
+        TypeInfoPtr currentClass;
+        CompilerState* parent = nullptr;
+    };
+
+    struct GlobalVar
+    {
+        bool isConst;
+        TypeInfoPtr type;
+    };
+
+    struct FuncInfo
+    {
+        TypeInfoPtr returnType;
+        std::vector<TypeInfoPtr> paramTypes;
+    };
+
+    struct FieldInfo
+    {
+        TypeInfoPtr type;
+        bool isWeak;
+    };
+
+    struct ClassInfo
+    {
+        std::string name;
+        std::unordered_map<std::string, FieldInfo> fields;
+        std::unordered_map<std::string, FuncInfo> methods;
+    };
+
+    CompilerState* m_current = nullptr;
+    std::unordered_map<std::string, GlobalVar> m_globalVariables;
+    std::unordered_map<std::string, ClassInfo> m_classes;
+    std::unordered_map<std::string, FuncInfo> m_functions;
+
+    TypeInfoPtr ResolveType(const std::string& name)
+    {
+        if (name.empty() || name == "Any") return TypeInfo::Simple(TypeKind::Any);
+
+        if (name.front() == '[' && name.back() == ']')
+        {
+            std::string inner = name.substr(1, name.size() - 2);
+            auto type = TypeInfo::Simple(TypeKind::Array);
+            type->elementType = ResolveType(inner);
+            return type;
+        }
+
+        if (name == "Void") return TypeInfo::Simple(TypeKind::Void);
+        if (name == "Int") return TypeInfo::Simple(TypeKind::Int);
+        if (name == "Double") return TypeInfo::Simple(TypeKind::Double);
+        if (name == "Bool") return TypeInfo::Simple(TypeKind::Bool);
+        if (name == "String") return TypeInfo::Simple(TypeKind::String);
+        if (name == "Array") return TypeInfo::Simple(TypeKind::Array);
+        if (m_classes.contains(name)) return TypeInfo::Class(name);
+
+        throw std::runtime_error("Unknown type '" + name + "'");
+    }
+
+    void InitState(const std::string& name, int arity, TypeInfoPtr returnType, TypeInfoPtr currentClass = nullptr)
+    {
+        auto* newState = new CompilerState();
+        newState->parent = m_current;
+        newState->returnType = returnType;
+        newState->currentClass = currentClass;
+        newState->function = std::make_shared<Function>();
+        newState->function->name = name;
+        newState->function->arity = arity;
+        newState->function->chunk = std::make_unique<Chunk>();
+
+        newState->locals.push_back({name, 0, true, TypeInfo::Simple(TypeKind::Any)});
+        newState->maxLocals = 1;
+        m_current = newState;
+    }
+
+    FunctionPtr EndState()
+    {
+        FunctionPtr func = m_current->function;
+        func->maxLocals = m_current->maxLocals;
+
+        CompilerState* enclosing = m_current->parent;
+        delete m_current;
+        m_current = enclosing;
+
+        return func;
+    }
+
+    void Emit(uint8_t byte)
+    {
+        m_current->function->chunk->code.push_back(byte);
+    }
+
+    uint8_t MakeConstant(const Value& value)
+    {
+        m_current->function->chunk->constants.push_back(value);
+        return static_cast<uint8_t>(m_current->function->chunk->constants.size() - 1);
+    }
 
     void BeginScope()
     {
-        m_scopeDepth++;
+        m_current->scopeDepth++;
     }
 
     void EndScope()
     {
-        m_scopeDepth--;
-        while (!m_locals.empty() && m_locals.back().depth > m_scopeDepth)
+        m_current->scopeDepth--;
+        while (!m_current->locals.empty() && m_current->locals.back().depth > m_current->scopeDepth)
         {
             Emit(OP_POP);
-            m_locals.pop_back();
+            m_current->locals.pop_back();
         }
     }
 
@@ -62,19 +164,24 @@ private:
         Emit(instruction);
         Emit(0xff);
         Emit(0xff);
-        return static_cast<int>(m_mainFunc->chunk->code.size() - 2);
+
+        return static_cast<int>(m_current->function->chunk->code.size() - 2);
     }
 
     void PatchJump(int offset)
     {
-        size_t target = m_mainFunc->chunk->code.size();
+        size_t target = m_current->function->chunk->code.size();
         if (target > UINT16_MAX)
         {
             throw std::runtime_error("Too much code to jump over.");
         }
+        m_current->function->chunk->code[offset] = (target >> 8) & 0xff;
+        m_current->function->chunk->code[offset + 1] = target & 0xff;
+    }
 
-        m_mainFunc->chunk->code[offset] = (target >> 8) & 0xff;
-        m_mainFunc->chunk->code[offset + 1] = target & 0xff;
+    [[nodiscard]] bool isGlobalScope() const
+    {
+        return m_current->parent == nullptr && m_current->scopeDepth == 0;
     }
 
     void CompileStmt(Stmt* stmt)
@@ -86,49 +193,76 @@ private:
         }
         else if (auto* varDecl = dynamic_cast<VarDeclStmt*>(stmt))
         {
-            if (!varDecl->typeName.empty())
-            {
-                const std::string& typeName = varDecl->typeName;
-
-                // TODO: добавить классы/структуры/alias
-                if (typeName != "Int" && typeName != "Double" && typeName != "String" && typeName != "Bool")
-                {
-                    throw std::runtime_error("Compiler Error: Unknown type '" + typeName + "'");
-                }
-
-                if (varDecl->initExpr)
-                {
-                    if (auto* num = dynamic_cast<NumberExpr*>(varDecl->initExpr.get()))
-                    {
-                        if (num->isDouble && typeName != "Double")
-                        {
-                            throw std::runtime_error("Type Error: Cannot assign Double to '" + typeName + "'");
-                        }
-                        if (!num->isDouble && typeName != "Int")
-                        {
-                            throw std::runtime_error("Type Error: Cannot assign Int to '" + typeName + "'");
-                        }
-                    }
-                    else if (auto* str = dynamic_cast<StringExpr*>(varDecl->initExpr.get()))
-                    {
-                        if (typeName != "String")
-                        {
-                            throw std::runtime_error("Type Error: Cannot assign String to '" + typeName + "'");
-                        }
-                    }
-                    else if (auto* b = dynamic_cast<BoolExpr*>(varDecl->initExpr.get()))
-                    {
-                        if (typeName != "Bool")
-                        {
-                            throw std::runtime_error("Type Error: Cannot assign Bool to '" + typeName + "'");
-                        }
-                    }
-                }
-            }
+            TypeInfoPtr initType = TypeInfo::Simple(TypeKind::Any);
 
             if (varDecl->initExpr)
             {
-                CompileExpr(varDecl->initExpr.get());
+                initType = CompileExpr(varDecl->initExpr.get());
+            }
+            else
+            {
+                Emit(OP_CONSTANT);
+                Emit(MakeConstant(false)); // по-хорошему здесь должен быть Null{}
+                initType = TypeInfo::Simple(TypeKind::Optional);
+            }
+
+            TypeInfoPtr finalType = initType;
+            if (!varDecl->typeName.empty())
+            {
+                finalType = ResolveType(varDecl->typeName);
+
+                if (!finalType->IsCompatible(initType))
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(varDecl->line) + ": Cannot initialize variable '" + varDecl->name +
+                        "' with incompatible type.");
+                }
+            }
+
+            if (isGlobalScope())
+            {
+                Emit(OP_DEFINE_GLOBAL);
+                Emit(MakeConstant(std::make_shared<std::string>(varDecl->name)));
+                m_globalVariables[varDecl->name] = { varDecl->isConst, finalType };
+            }
+            else
+            {
+                const auto slot = static_cast<int>(m_current->locals.size());
+                Emit(OP_SET_LOCAL);
+                Emit(static_cast<uint8_t>(slot));
+                Emit(OP_POP);
+                m_current->locals.push_back({varDecl->name, m_current->scopeDepth, varDecl->isConst, finalType});
+                m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+            }
+        }
+        else if (auto* funcDecl = dynamic_cast<FuncDeclStmt*>(stmt))
+        {
+            std::vector<TypeInfoPtr> paramTypes;
+            for (const auto& param : funcDecl->parameters)
+            {
+                paramTypes.push_back(ResolveType(param.type));
+            }
+
+            TypeInfoPtr retType = ResolveType(funcDecl->returnType);
+            m_functions[funcDecl->name] = { retType, paramTypes };
+
+            InitState(funcDecl->name, static_cast<int>(funcDecl->parameters.size()), retType);
+            BeginScope();
+
+            for (const auto& param : funcDecl->parameters)
+            {
+                m_current->locals.push_back({param.name, m_current->scopeDepth, true, ResolveType(param.type)});
+                m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+            }
+
+            for (const auto& s : funcDecl->body->statements)
+            {
+                CompileStmt(s.get());
+            }
+
+            if (funcDecl->name == "init")
+            {
+                Emit(OP_GET_LOCAL);
+                Emit(0);
             }
             else
             {
@@ -136,12 +270,68 @@ private:
                 Emit(MakeConstant(false));
             }
 
-            int slot = m_locals.size();
-            Emit(OP_SET_LOCAL);
-            Emit(static_cast<uint8_t>(slot));
-            Emit(OP_POP);
+            Emit(OP_RETURN);
+            EndScope();
+            FunctionPtr compiledFunc = EndState();
 
-            m_locals.push_back({varDecl->name, m_scopeDepth});
+            Emit(OP_CONSTANT);
+            Emit(MakeConstant(compiledFunc));
+
+            if (isGlobalScope())
+            {
+                Emit(OP_DEFINE_GLOBAL);
+                Emit(MakeConstant(std::make_shared<std::string>(funcDecl->name)));
+                m_globalVariables[funcDecl->name] = { true, TypeInfo::Simple(TypeKind::Func) };
+            }
+            else
+            {
+                const auto slot = static_cast<int>(m_current->locals.size());
+                Emit(OP_SET_LOCAL);
+                Emit(static_cast<uint8_t>(slot));
+                Emit(OP_POP);
+                m_current->locals.push_back({funcDecl->name, m_current->scopeDepth, true, TypeInfo::Simple(TypeKind::Func)});
+                m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+            }
+        }
+        else if (auto* returnStmt = dynamic_cast<ReturnStmt*>(stmt))
+        {
+            TypeInfoPtr retType = TypeInfo::Simple(TypeKind::Void);
+            if (returnStmt->value)
+            {
+                retType = CompileExpr(returnStmt->value.get());
+            }
+
+            if (!m_current->returnType->IsCompatible(retType))
+            {
+                throw std::runtime_error("Type Error at line " + std::to_string(returnStmt->line) + ": Incompatible return value type.");
+            }
+
+            if (returnStmt->value)
+            {
+                if (m_current->returnType->kind == TypeKind::Void)
+                {
+                    throw std::runtime_error("Compiler Error at line " + std::to_string(returnStmt->line) + ": Cannot return a value from a Void function");
+                }
+            }
+            else
+            {
+                if (m_current->returnType->kind != TypeKind::Void)
+                {
+                    throw std::runtime_error("Compiler Error at line " + std::to_string(returnStmt->line) + ": Expected a return value");
+                }
+
+                if (m_current->function->name == "init")
+                {
+                    Emit(OP_GET_LOCAL);
+                    Emit(0);
+                }
+                else
+                {
+                    Emit(OP_CONSTANT);
+                    Emit(MakeConstant(false));
+                }
+            }
+            Emit(OP_RETURN);
         }
         else if (auto* blockStmt = dynamic_cast<BlockStmt*>(stmt))
         {
@@ -155,16 +345,13 @@ private:
         else if (auto* ifStmt = dynamic_cast<IfStmt*>(stmt))
         {
             CompileExpr(ifStmt->condition.get());
-
             int jumpIfFalse = EmitJump(OP_JUMP_IF_FALSE);
-
             CompileStmt(ifStmt->trueBlock.get());
 
             if (ifStmt->falseBlock)
             {
                 int jumpToEnd = EmitJump(OP_JUMP);
                 PatchJump(jumpIfFalse);
-
                 CompileStmt(ifStmt->falseBlock.get());
                 PatchJump(jumpToEnd);
             }
@@ -173,88 +360,565 @@ private:
                 PatchJump(jumpIfFalse);
             }
         }
+        else if (auto* whileStmt = dynamic_cast<WhileStmt*>(stmt))
+        {
+            int loopStart = static_cast<int>(m_current->function->chunk->code.size());
+            CompileExpr(whileStmt->condition.get());
+            int exitJump = EmitJump(OP_JUMP_IF_FALSE);
+            CompileStmt(whileStmt->body.get());
+            int loopJump = EmitJump(OP_JUMP);
+
+            if (loopStart > UINT16_MAX)
+            {
+                throw std::runtime_error("Loop is too large.");
+            }
+            m_current->function->chunk->code[loopJump] = (loopStart >> 8) & 0xff;
+            m_current->function->chunk->code[loopJump + 1] = loopStart & 0xff;
+            PatchJump(exitJump);
+        }
+        else if (auto* classDecl = dynamic_cast<ClassDeclStmt*>(stmt))
+        {
+            m_classes[classDecl->name] = ClassInfo{classDecl->name, {}, {}};
+
+            ClassInfo classInfo;
+            classInfo.name = classDecl->name;
+
+            for (const auto& member : classDecl->members)
+            {
+                if (auto* funcDeclaration = dynamic_cast<FuncDeclStmt*>(member.get()))
+                {
+                    std::vector<TypeInfoPtr> paramTypes;
+                    paramTypes.reserve(funcDeclaration->parameters.size());
+                    for (const auto& param : funcDeclaration->parameters)
+                    {
+                        paramTypes.push_back(ResolveType(param.type));
+                    }
+                    classInfo.methods[funcDeclaration->name] = { ResolveType(funcDeclaration->returnType), paramTypes };
+                }
+                else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
+                {
+                    TypeInfoPtr t = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
+                    classInfo.fields[varDeclaration->name] = { t, varDeclaration->isWeak };
+                }
+            }
+            m_classes[classDecl->name] = classInfo;
+
+            Emit(OP_CLASS);
+            Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+
+            if (isGlobalScope())
+            {
+                Emit(OP_DEFINE_GLOBAL);
+                Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                m_globalVariables[classDecl->name] = { true, TypeInfo::Class(classDecl->name) };
+            }
+            else
+            {
+                int slot = static_cast<int>(m_current->locals.size());
+                Emit(OP_SET_LOCAL);
+                Emit(static_cast<uint8_t>(slot));
+                Emit(OP_POP);
+                m_current->locals.push_back({classDecl->name, m_current->scopeDepth, true, TypeInfo::Class(classDecl->name)});
+                m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+            }
+
+            for (const auto& member : classDecl->members)
+            {
+                if (auto* funcDeclaration = dynamic_cast<FuncDeclStmt*>(member.get()))
+                {
+                    InitState(funcDeclaration->name, static_cast<int>(funcDeclaration->parameters.size()), ResolveType(funcDeclaration->returnType), TypeInfo::Class(classDecl->name));
+                    BeginScope();
+
+                    m_current->locals[0].name = "self";
+                    m_current->locals[0].type = TypeInfo::Class(classDecl->name);
+
+                    for (const auto& param : funcDeclaration->parameters)
+                    {
+                        m_current->locals.push_back({param.name, m_current->scopeDepth, true, ResolveType(param.type)});
+                        m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+                    }
+
+                    for (const auto& s : funcDeclaration->body->statements)
+                    {
+                        CompileStmt(s.get());
+                    }
+
+                    if (funcDeclaration->name == "init")
+                    {
+                        Emit(OP_GET_LOCAL);
+                        Emit(0);
+                    }
+                    else
+                    {
+                        Emit(OP_CONSTANT);
+                        Emit(MakeConstant(false));
+                    }
+                    Emit(OP_RETURN);
+                    EndScope();
+
+                    FunctionPtr compiledMethod = EndState();
+
+                    Emit(OP_CONSTANT);
+                    Emit(MakeConstant(compiledMethod));
+
+                    uint8_t methodNameConst = MakeConstant(std::make_shared<std::string>(funcDeclaration->name));
+
+                    if (isGlobalScope())
+                    {
+                        Emit(OP_GET_GLOBAL);
+                        Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                    }
+                    else
+                    {
+                        int slot = -1;
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        {
+                            if (m_current->locals[i].name == classDecl->name)
+                            {
+                                slot = i;
+                                break;
+                            }
+                        }
+                        Emit(OP_GET_LOCAL);
+                        Emit(static_cast<uint8_t>(slot));
+                    }
+
+                    Emit(OP_METHOD);
+                    Emit(methodNameConst);
+                }
+                else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
+                {
+                    if (isGlobalScope())
+                    {
+                        Emit(OP_GET_GLOBAL);
+                        Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                    }
+                    else
+                    {
+                        int slot = -1;
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        {
+                            if (m_current->locals[i].name == classDecl->name)
+                            {
+                                slot = i;
+                                break;
+                            }
+                        }
+                        Emit(OP_GET_LOCAL);
+                        Emit(static_cast<uint8_t>(slot));
+                    }
+
+                    Emit(OP_FIELD);
+                    Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                    Emit(OP_POP);
+                }
+            }
+        }
     }
 
-    void CompileExpr(Expr* expr)
+    TypeInfoPtr CompileExpr(Expr* expr)
     {
-        if (auto* num = dynamic_cast<NumberExpr*>(expr))
+        if (auto* assign = dynamic_cast<AssignExpr*>(expr))
+        {
+            if (auto* ident = dynamic_cast<IdentifierExpr*>(assign->target.get()))
+            {
+                int slot = -1;
+                TypeInfoPtr varType = TypeInfo::Simple(TypeKind::Any);
+
+                for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                {
+                    if (m_current->locals[i].name == ident->name)
+                    {
+                        if (m_current->locals[i].isConst)
+                        {
+                            throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Cannot reassign to constant '" + ident->name + "'");
+                        }
+                        slot = i;
+                        varType = m_current->locals[i].type;
+                        break;
+                    }
+                }
+
+                if (slot == -1)
+                {
+                    if (m_globalVariables.contains(ident->name))
+                    {
+                        if (m_globalVariables[ident->name].isConst)
+                        {
+                            throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Cannot reassign to global constant '" + ident->name + "'");
+                        }
+                        varType = m_globalVariables[ident->name].type;
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Variable '" + ident->name + "' is not declared");
+                    }
+                }
+
+                TypeInfoPtr valType = CompileExpr(assign->value.get());
+
+                if (!varType->IsCompatible(valType))
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(assign->line) + ": Cannot assign incompatible value to variable '" + ident->name + "'");
+                }
+
+                if (slot != -1)
+                {
+                    Emit(OP_SET_LOCAL);
+                    Emit(static_cast<uint8_t>(slot));
+                }
+                else
+                {
+                    Emit(OP_SET_GLOBAL);
+                    Emit(MakeConstant(std::make_shared<std::string>(ident->name)));
+                }
+                return varType;
+            }
+            else if (auto* idxExpr = dynamic_cast<IndexExpr*>(assign->target.get()))
+            {
+                TypeInfoPtr arrType = CompileExpr(idxExpr->array.get());
+                TypeInfoPtr idxType = CompileExpr(idxExpr->index.get());
+
+                if (idxType->kind != TypeKind::Int)
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(idxExpr->line) + ": Array index must be an Int");
+                }
+
+                TypeInfoPtr valType = CompileExpr(assign->value.get());
+                Emit(OP_SET_INDEX);
+                return valType;
+            }
+        }
+        else if (auto* num = dynamic_cast<NumberExpr*>(expr))
         {
             Emit(OP_CONSTANT);
             if (num->isDouble)
             {
                 Emit(MakeConstant(num->value));
+                return TypeInfo::Simple(TypeKind::Double);
             }
             else
             {
                 Emit(MakeConstant(static_cast<int64_t>(num->value)));
+                return TypeInfo::Simple(TypeKind::Int);
             }
         }
         else if (auto* b = dynamic_cast<BoolExpr*>(expr))
         {
             Emit(OP_CONSTANT);
             Emit(MakeConstant(b->value));
+            return TypeInfo::Simple(TypeKind::Bool);
         }
         else if (auto* str = dynamic_cast<StringExpr*>(expr))
         {
             Emit(OP_CONSTANT);
             Emit(MakeConstant(std::make_shared<std::string>(str->value)));
+            return TypeInfo::Simple(TypeKind::String);
         }
         else if (auto* bin = dynamic_cast<BinaryExpr*>(expr))
         {
-            CompileExpr(bin->left.get());
-            CompileExpr(bin->right.get());
+            TypeInfoPtr lType = CompileExpr(bin->left.get());
+            TypeInfoPtr rType = CompileExpr(bin->right.get());
 
-            if (bin->op == "+") Emit(OP_ADD);
-            else if (bin->op == "-") Emit(OP_SUB);
-            else if (bin->op == "*") Emit(OP_MUL);
-            else if (bin->op == "/") Emit(OP_DIV);
-            else if (bin->op == "%") Emit(OP_MOD);
-            else if (bin->op == "==") Emit(OP_EQUAL);
-            else if (bin->op == "<") Emit(OP_LESS);
-            else if (bin->op == ">") Emit(OP_GREATER);
-            else if (bin->op == "<=") { Emit(OP_GREATER); Emit(OP_NOT); }
-            else if (bin->op == ">=") { Emit(OP_LESS); Emit(OP_NOT); }
-            else if (bin->op == "!=") { Emit(OP_EQUAL); Emit(OP_NOT); }
+            if (bin->op == "+" || bin->op == "-" || bin->op == "*" || bin->op == "/" || bin->op == "%")
+            {
+                if (lType->kind == TypeKind::String && bin->op == "+")
+                {
+                    Emit(OP_ADD);
+                    return TypeInfo::Simple(TypeKind::String);
+                }
+
+                if ((lType->kind != TypeKind::Int && lType->kind != TypeKind::Double && lType->kind != TypeKind::Any) ||
+                    (rType->kind != TypeKind::Int && rType->kind != TypeKind::Double && rType->kind != TypeKind::Any))
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(bin->line) + ": Arithmetic operators are not supported for these types");
+                }
+
+                if (bin->op == "+") Emit(OP_ADD);
+                else if (bin->op == "-") Emit(OP_SUB);
+                else if (bin->op == "*") Emit(OP_MUL);
+                else if (bin->op == "/") Emit(OP_DIV);
+                else if (bin->op == "%") Emit(OP_MOD);
+
+                if (lType->kind == TypeKind::Double || rType->kind == TypeKind::Double)
+                    return TypeInfo::Simple(TypeKind::Double);
+                return TypeInfo::Simple(TypeKind::Int);
+            }
+
+            if (bin->op == "==" || bin->op == "!=" || bin->op == "<" || bin->op == ">" || bin->op == "<=" || bin->op == ">=")
+            {
+                if (!lType->IsCompatible(rType))
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(bin->line) + ": Cannot compare different types");
+                }
+
+                if (bin->op == "==") Emit(OP_EQUAL);
+                else if (bin->op == "<") Emit(OP_LESS);
+                else if (bin->op == ">") Emit(OP_GREATER);
+                else if (bin->op == "<=") { Emit(OP_GREATER); Emit(OP_NOT); }
+                else if (bin->op == ">=") { Emit(OP_LESS); Emit(OP_NOT); }
+                else if (bin->op == "!=") { Emit(OP_EQUAL); Emit(OP_NOT); }
+
+                return TypeInfo::Simple(TypeKind::Bool);
+            }
+
+            if (bin->op == "&&" || bin->op == "||")
+            {
+                if (lType->kind != TypeKind::Bool || rType->kind != TypeKind::Bool)
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(bin->line) + ": Logical operators '&&' and '||' require Bool operands");
+                }
+
+                if (bin->op == "&&") Emit(OP_AND);
+                else if (bin->op == "||") Emit(OP_OR);
+                return TypeInfo::Simple(TypeKind::Bool);
+            }
         }
         else if (auto* ident = dynamic_cast<IdentifierExpr*>(expr))
         {
-            int slot = -1;
-            for (int i = static_cast<int>(m_locals.size()) - 1; i >= 0; --i)
+            if (ident->name == "self")
+            {
+                if (!m_current->currentClass)
                 {
-                if (m_locals[i].name == ident->name) {
-                    slot = i; break;
+                    throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Cannot use 'self' outside of a class method");
                 }
             }
 
-            if (slot != -1) {
+            int slot = -1;
+            TypeInfoPtr typeOut = TypeInfo::Simple(TypeKind::Any);
+
+            for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+            {
+                if (m_current->locals[i].name == ident->name)
+                {
+                    slot = i;
+                    typeOut = m_current->locals[i].type;
+                    break;
+                }
+            }
+
+            if (slot != -1)
+            {
                 Emit(OP_GET_LOCAL);
                 Emit(static_cast<uint8_t>(slot));
-            } else {
+                return typeOut;
+            }
+            else
+            {
+                if (m_globalVariables.contains(ident->name))
+                {
+                    typeOut = m_globalVariables[ident->name].type;
+                }
+                else if (m_classes.contains(ident->name))
+                {
+                    typeOut = TypeInfo::Class(ident->name);
+                }
+                else if (m_functions.contains(ident->name))
+                {
+                    typeOut = TypeInfo::Simple(TypeKind::Func);
+                }
+                else
+                {
+                    throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Undefined identifier '" + ident->name + "'");
+                }
+
                 Emit(OP_GET_GLOBAL);
                 Emit(MakeConstant(std::make_shared<std::string>(ident->name)));
+                return typeOut;
             }
         }
         else if (auto* call = dynamic_cast<CallExpr*>(expr))
         {
-            CompileExpr(call->callee.get());
+            bool isConstructor = false;
+            bool isFunc = false;
+            std::string funcName;
 
-            for (const auto& arg : call->arguments) {
-                CompileExpr(arg.get());
+            if (auto* identCallee = dynamic_cast<IdentifierExpr*>(call->callee.get()))
+            {
+                funcName = identCallee->name;
+                if (m_classes.contains(funcName)) isConstructor = true;
+                else if (m_functions.contains(funcName)) isFunc = true;
+            }
+            else if (auto* getCallee = dynamic_cast<GetExpr*>(call->callee.get()))
+            {
+                TypeInfoPtr objType = CompileExpr(getCallee->object.get());
+                if (objType->kind == TypeKind::Class && m_classes.contains(objType->name))
+                {
+                    const auto& klass = m_classes[objType->name];
+                    if (klass.methods.contains(getCallee->propertyName))
+                    {
+                        const auto& method = klass.methods.at(getCallee->propertyName);
+                        Emit(OP_GET_PROPERTY);
+                        Emit(MakeConstant(std::make_shared<std::string>(getCallee->propertyName)));
+
+                        if (call->arguments.size() != method.paramTypes.size())
+                        {
+                            throw std::runtime_error("Type Error at line " + std::to_string(call->line) + ": Method arguments count mismatch");
+                        }
+
+                        for (size_t i = 0; i < call->arguments.size(); ++i)
+                        {
+                            TypeInfoPtr argType = CompileExpr(call->arguments[i].get());
+                            if (!method.paramTypes[i]->IsCompatible(argType))
+                            {
+                                throw std::runtime_error("Type Error: Argument type mismatch");
+                            }
+                        }
+
+                        Emit(OP_CALL);
+                        Emit(static_cast<uint8_t>(call->arguments.size()));
+                        return method.returnType;
+                    }
+                }
             }
 
+            CompileExpr(call->callee.get());
+
+            if (isConstructor)
+            {
+                const auto& klass = m_classes[funcName];
+                if (klass.methods.contains("init"))
+                {
+                    const auto& initMethod = klass.methods.at("init");
+                    if (call->arguments.size() != initMethod.paramTypes.size())
+                    {
+                        throw std::runtime_error("Type Error at line " + std::to_string(call->line) + ": Constructor arguments count mismatch");
+                    }
+
+                    for (size_t i = 0; i < call->arguments.size(); ++i)
+                    {
+                        TypeInfoPtr argType = CompileExpr(call->arguments[i].get());
+                        if (!initMethod.paramTypes[i]->IsCompatible(argType))
+                        {
+                            throw std::runtime_error("Type Error: Constructor argument type mismatch");
+                        }
+                    }
+                }
+                else if (!call->arguments.empty())
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(call->line) + ": Class '" + funcName + "' has no init constructor, but arguments were provided.");
+                }
+
+                Emit(OP_CALL);
+                Emit(static_cast<uint8_t>(call->arguments.size()));
+                return TypeInfo::Class(funcName);
+            }
+
+            if (isFunc)
+            {
+                const auto& func = m_functions[funcName];
+                if (call->arguments.size() != func.paramTypes.size())
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(call->line) + ": Function arguments count mismatch");
+                }
+
+                for (size_t i = 0; i < call->arguments.size(); ++i)
+                {
+                    TypeInfoPtr argType = CompileExpr(call->arguments[i].get());
+                    if (!func.paramTypes[i]->IsCompatible(argType))
+                    {
+                        throw std::runtime_error("Type Error: Function argument type mismatch");
+                    }
+                }
+
+                Emit(OP_CALL);
+                Emit(static_cast<uint8_t>(call->arguments.size()));
+                return func.returnType;
+            }
+
+            for (const auto& arg : call->arguments)
+            {
+                CompileExpr(arg.get());
+            }
             Emit(OP_CALL);
             Emit(static_cast<uint8_t>(call->arguments.size()));
+            return TypeInfo::Simple(TypeKind::Any);
         }
-    }
+        else if (auto* arr = dynamic_cast<ArrayExpr*>(expr))
+        {
+            Emit(OP_BUILD_ARRAY);
+            for (const auto& el : arr->elements)
+            {
+                CompileExpr(el.get());
+                Emit(OP_ARRAY_PUSH);
+            }
+            return TypeInfo::Simple(TypeKind::Array);
+        }
+        else if (auto* idx = dynamic_cast<IndexExpr*>(expr))
+        {
+            TypeInfoPtr arrType = CompileExpr(idx->array.get());
+            CompileExpr(idx->index.get());
 
-    void Emit(uint8_t byte)
-    {
-        m_mainFunc->chunk->code.push_back(byte);
-    }
+            Emit(OP_GET_INDEX);
 
-    uint8_t MakeConstant(const Value& value)
-    {
-        m_mainFunc->chunk->constants.push_back(value);
-        return static_cast<uint8_t>(m_mainFunc->chunk->constants.size() - 1);
+            if (arrType->kind == TypeKind::Array && arrType->elementType)
+            {
+                return arrType->elementType;
+            }
+            return TypeInfo::Simple(TypeKind::Any);
+        }
+        else if (auto* getExpr = dynamic_cast<GetExpr*>(expr))
+        {
+            TypeInfoPtr objType = CompileExpr(getExpr->object.get());
+            if (objType->kind == TypeKind::Class && m_classes.contains(objType->name))
+            {
+                const auto& klass = m_classes[objType->name];
+                if (klass.fields.contains(getExpr->propertyName))
+                {
+                    Emit(OP_GET_PROPERTY);
+                    Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+                    return klass.fields.at(getExpr->propertyName).type;
+                }
+                if (klass.methods.contains(getExpr->propertyName))
+                {
+                    Emit(OP_GET_PROPERTY);
+                    Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+                    return TypeInfo::Simple(TypeKind::Func);
+                }
+                throw std::runtime_error("Compiler Error at line " + std::to_string(getExpr->line) + ": Class '" + objType->name + "' has no property or method '" + getExpr->propertyName + "'");
+            }
+            Emit(OP_GET_PROPERTY);
+            Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+            return TypeInfo::Simple(TypeKind::Any);
+        }
+        else if (auto* setExpr = dynamic_cast<SetExpr*>(expr))
+        {
+            TypeInfoPtr objType = CompileExpr(setExpr->object.get());
+            TypeInfoPtr valType = CompileExpr(setExpr->value.get());
+
+            if (objType->kind == TypeKind::Class && m_classes.contains(objType->name))
+            {
+                const auto& klass = m_classes[objType->name];
+                if (!klass.fields.contains(setExpr->propertyName))
+                {
+                    throw std::runtime_error("Compiler Error at line " + std::to_string(setExpr->line) + ": Class '" + objType->name + "' has no property '" + setExpr->propertyName + "'");
+                }
+
+                TypeInfoPtr targetType = klass.fields.at(setExpr->propertyName).type;
+                bool isWeak = klass.fields.at(setExpr->propertyName).isWeak;
+
+                if (!targetType->IsCompatible(valType))
+                {
+                    throw std::runtime_error("Type Error at line " + std::to_string(setExpr->line) + ": Cannot assign incompatible value to property '" + setExpr->propertyName + "'");
+                }
+
+                if (isWeak)
+                {
+                    Emit(OP_SET_PROPERTY_WEAK);
+                }
+                else
+                {
+                    Emit(OP_SET_PROPERTY);
+                }
+
+                Emit(MakeConstant(std::make_shared<std::string>(setExpr->propertyName)));
+                return targetType;
+            }
+
+            Emit(OP_SET_PROPERTY);
+            Emit(MakeConstant(std::make_shared<std::string>(setExpr->propertyName)));
+            return TypeInfo::Simple(TypeKind::Any);
+        }
+        return TypeInfo::Simple(TypeKind::Any);
     }
 };

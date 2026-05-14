@@ -1,0 +1,60 @@
+class Matrix2x2 {
+    let data: [Double]
+
+    init(m00: Double, m01: Double, m10: Double, m11: Double) {
+        self.data = [m00, m01, m10, m11]
+    }
+
+    func add(other: Matrix2x2): Matrix2x2 {
+        return Matrix2x2(
+            self.data[0] + other.data[0],
+            self.data[1] + other.data[1],
+            self.data[2] + other.data[2],
+            self.data[3] + other.data[3]
+        )
+    }
+
+    func multiply(other: Matrix2x2): Matrix2x2 {
+        return Matrix2x2(
+            self.data[0] * other.data[0] + self.data[1] * other.data[2],
+            self.data[0] * other.data[1] + self.data[1] * other.data[3],
+            self.data[2] * other.data[0] + self.data[3] * other.data[2],
+            self.data[2] * other.data[1] + self.data[3] * other.data[3]
+        )
+    }
+
+    func determinant(): Double {
+        return self.data[0] * self.data[3] - self.data[1] * self.data[2]
+    }
+
+    func transpose(): Matrix2x2 {
+        return Matrix2x2(
+            self.data[0], self.data[2],
+            self.data[1], self.data[3]
+        )
+    }
+
+    func printMatrix(): Void {
+        for (let i = 0; i < 4; i = i + 1) {
+            print(self.data[i])
+        }
+    }
+}
+
+let a: Matrix2x2 = Matrix2x2(1.0, 2.0, 3.0, 4.0)
+let b: Matrix2x2 = Matrix2x2(2.0, 0.0, 1.0, 2.0)
+
+print("--- Determinant of A ---")
+print(a.determinant()) // -2.0
+
+print("--- A + B ---")
+let c: Matrix2x2 = a.add(b)
+c.printMatrix() // 3.0, 2.0, 4.0, 6.0
+
+print("--- A * B ---")
+let d: Matrix2x2 = a.multiply(b)
+d.printMatrix() // 4.0, 4.0, 10.0, 8.0
+
+print("--- Transpose A ---")
+let t: Matrix2x2 = a.transpose()
+t.printMatrix() // 1.0, 3.0, 2.0, 4.0

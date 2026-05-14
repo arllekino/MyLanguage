@@ -1,0 +1,37 @@
+class Robot {
+    let name: String
+    let id: Int
+
+    init(name: String, id: Int) {
+        self.name = name
+        self.id = id
+    }
+
+    func identify() {
+        print("I am robot")
+        print(self.name)
+        print(self.id)
+    }
+}
+
+class Car {
+    let model: String
+    let speed: Int
+
+    init(model: String, speed: Int) {
+        self.model = model
+        self.speed = speed
+    }
+
+    func drive() {
+        print("Driving car")
+        print(self.model)
+        print(self.speed)
+    }
+}
+
+let r2d2 = Robot("R2-D2", 101)
+r2d2.identify()
+
+let tesla = Car("Model S", 250)
+tesla.drive()

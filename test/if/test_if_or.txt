@@ -1,0 +1,9 @@
+if (false || true) {
+    print("true 1")
+}
+
+if (true || false) {
+    print("true 2")
+}
+
+print("Done")

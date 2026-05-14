@@ -1,0 +1,9 @@
+const name: String = "MyString1"
+
+if (name == "MyString") {
+    print("name == 'MyString'")
+} else if (false) {
+    print("else if")
+} else {
+    print("else")
+}
