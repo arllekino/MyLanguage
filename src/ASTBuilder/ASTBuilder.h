@@ -103,6 +103,10 @@ private:
         {
             return ParseClassDeclaration();
         }
+        if (MatchKeyword("struct"))
+        {
+            return ParseStructDeclaration();
+        }
         if (MatchKeyword("func"))
         {
             return ParseFuncDeclaration(false);
@@ -157,6 +161,37 @@ private:
         Consume(TokenType::SEPARATOR, "Expected '}' after class body");
 
         return classDecl;
+    }
+
+    std::unique_ptr<Stmt> ParseStructDeclaration()
+    {
+        Token startToken = Previous();
+        auto nameToken = Consume(TokenType::IDENTIFIER, "Expected struct name");
+        Consume(TokenType::SEPARATOR, "Expected '{' before struct body");
+
+        auto structDecl = std::make_unique<StructDeclStmt>();
+        structDecl->line = startToken.line;
+        structDecl->column = startToken.column;
+        structDecl->name = nameToken.value;
+
+        while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
+        {
+            if (IsAtEnd()) throw std::runtime_error("Expected '}' after struct body");
+            if (Peek().type == TokenType::COMMENT) { Advance(); continue; }
+
+            if (MatchKeyword("let") || MatchKeyword("const"))
+            {
+                auto varNode = ParseVarDeclaration(Previous().value == "const");
+                structDecl->members.push_back(std::unique_ptr<VarDeclStmt>(dynamic_cast<VarDeclStmt*>(varNode.release())));
+            }
+            else
+            {
+                throw std::runtime_error("Parse Error: Only variables and computed properties are allowed inside a struct.");
+            }
+        }
+        Consume(TokenType::SEPARATOR, "Expected '}' after struct body");
+
+        return structDecl;
     }
 
     std::unique_ptr<Stmt> ParseFuncDeclaration(const bool isInit)
@@ -238,6 +273,10 @@ private:
         if (MatchValue(TokenType::OPERATOR, "="))
         {
             varDecl->initExpr = ParseExpression();
+        }
+        else if (MatchValue(TokenType::SEPARATOR, "{"))
+        {
+            varDecl->computedBody = ParseBlock();
         }
         else if (isConst)
         {

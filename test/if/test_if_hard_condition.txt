@@ -3,7 +3,7 @@ const b = 2.0
 const c = 2.0
 const d = 5.0
 
-(6 <= 4) ||
+// (6 <= 4) ||
 if ((c * (a + b) + (0.0 - b) <= (a + c)) || (a > c) && ((a + b) + c * d) < 25.0) {
     print(true)
 } else {

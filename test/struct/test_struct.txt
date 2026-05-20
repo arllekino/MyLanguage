@@ -1,0 +1,49 @@
+struct Point {
+    let x: Double
+    let y: Double
+}
+
+let p1: Point = Point(10.0, 20.5)
+
+print("--- Point ---")
+print(p1.x) // 10.0
+print(p1.y) // 20.5
+
+struct Rect {
+    let width: Double
+    let height: Double
+
+    let area: Double {
+        return self.width * self.height
+    }
+
+    let perimeter: Double {
+        return (self.width + self.height) * 2.0
+    }
+}
+
+let rect: Rect = Rect(5.0, 4.0)
+
+print("--- Rect ---")
+print(rect.width) // 5.0
+print(rect.height) // 4.0
+
+print("--- Rect Computed Properties ---")
+print(rect.area) // 20.0
+print(rect.perimeter) // 18.0
+
+
+struct Box {
+    let origin: Point
+    let size: Rect
+
+    let volume: Double {
+        return self.size.area * 10.0
+    }
+}
+
+let myBox: Box = Box(p1, rect)
+
+print("--- Box ---")
+print(myBox.origin.x) // 10.0
+print(myBox.volume)   // 200.0
