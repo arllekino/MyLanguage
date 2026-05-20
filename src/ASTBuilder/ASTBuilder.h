@@ -141,17 +141,25 @@ private:
                 continue;
             }
 
+            const auto accessLevel = ParseAccessModifier();
+
             if (MatchKeyword("init"))
             {
-                classDecl->members.push_back(ParseFuncDeclaration(true));
+                auto funcNode = ParseFuncDeclaration(true);
+                dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
+                classDecl->members.push_back(std::move(funcNode));
             }
             else if (MatchKeyword("func"))
             {
-                classDecl->members.push_back(ParseFuncDeclaration(false));
+                auto funcNode = ParseFuncDeclaration(false);
+                dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
+                classDecl->members.push_back(std::move(funcNode));
             }
             else if (MatchKeyword("let") || MatchKeyword("const"))
             {
-                classDecl->members.push_back(ParseVarDeclaration(Previous().value == "const"));
+                auto varNode = ParseVarDeclaration(Previous().value == "const");
+                dynamic_cast<VarDeclStmt*>(varNode.get())->accessLevel = accessLevel;
+                classDecl->members.push_back(std::move(varNode));
             }
             else
             {
@@ -176,13 +184,27 @@ private:
 
         while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
         {
-            if (IsAtEnd()) throw std::runtime_error("Expected '}' after struct body");
-            if (Peek().type == TokenType::COMMENT) { Advance(); continue; }
+            if (IsAtEnd())
+            {
+                throw std::runtime_error("Expected '}' after struct body");
+            }
+            if (Peek().type == TokenType::COMMENT)
+            {
+                Advance();
+                continue;
+            }
+
+            AccessLevel accessLevel = ParseAccessModifier();
 
             if (MatchKeyword("let") || MatchKeyword("const"))
             {
                 auto varNode = ParseVarDeclaration(Previous().value == "const");
-                structDecl->members.push_back(std::unique_ptr<VarDeclStmt>(dynamic_cast<VarDeclStmt*>(varNode.release())));
+                auto varStmt = dynamic_cast<VarDeclStmt*>(varNode.get());
+                varStmt->accessLevel = accessLevel;
+
+                structDecl->members.push_back(
+                    std::unique_ptr<VarDeclStmt>(static_cast<VarDeclStmt*>(varNode.release()))
+                );
             }
             else
             {
@@ -775,5 +797,18 @@ private:
             return "[" + elementType + "]";
         }
         return Consume(TokenType::IDENTIFIER, "Expected type name").value;
+    }
+
+    AccessLevel ParseAccessModifier()
+    {
+        if (MatchKeyword("private"))
+        {
+            return AccessLevel::Private;
+        }
+        if (MatchKeyword("internal"))
+        {
+            return AccessLevel::Internal;
+        }
+        return AccessLevel::Internal;
     }
 };

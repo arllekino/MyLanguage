@@ -1,0 +1,29 @@
+class BankAccount {
+    private let balance: Double
+
+    private let tax: Double {
+        return self.balance * 0.13
+    }
+
+    init(balance: Double) {
+        self.balance = balance
+    }
+
+    internal func deposit(amount: Double): Void {
+        self.balance = self.balance + amount
+        print("Tax will be:")
+        print(self.tax)
+    }
+}
+
+let account = BankAccount(1000.0)
+account.deposit(500.0) // 195
+
+// print(account.balance)
+// Access Error at line 22: Property 'balance' is private and cannot be accessed outside of 'BankAccount'
+
+// print(account.tax)
+// Access Error at line 25: Property/Method 'tax' is private and cannot be accessed outside of 'BankAccount'
+
+// account.balance = 9999.0
+// Access Error at line 28: Property 'balance' is private and cannot be accessed outside of 'BankAccount'

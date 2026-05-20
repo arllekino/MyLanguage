@@ -31,6 +31,7 @@ add_executable(MyLanguage
         src/Compiler/ByteCodeExporter.h
         src/Utils/TypeInfo.h
         src/Signature/Signature.h
+        src/ASTBuilder/AccessLevel.h
 )
 
 add_executable(MyLanguageTest test/test.cpp)

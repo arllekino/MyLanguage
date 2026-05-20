@@ -64,12 +64,14 @@ private:
     {
         TypeInfoPtr returnType;
         std::vector<TypeInfoPtr> paramTypes;
+        AccessLevel accessLevel = AccessLevel::Internal;
     };
 
     struct FieldInfo
     {
         TypeInfoPtr type;
         bool isWeak{};
+        AccessLevel accessLevel = AccessLevel::Internal;
     };
 
     struct ClassInfo
@@ -435,12 +437,34 @@ private:
                 {
                     paramTypes.push_back(ResolveType(param.type));
                 }
-                classInfo.methods[funcDeclaration->name] = { ResolveType(funcDeclaration->returnType), paramTypes };
+                classInfo.methods[funcDeclaration->name] = {
+                    ResolveType(funcDeclaration->returnType),
+                    paramTypes,
+                    funcDeclaration->accessLevel
+                };
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
-                TypeInfoPtr t = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
-                classInfo.fields[varDeclaration->name] = { t, varDeclaration->isWeak };
+                TypeInfoPtr type = varDeclaration->typeName.empty()
+                    ? TypeInfo::Simple(TypeKind::Any)
+                    : ResolveType(varDeclaration->typeName);
+
+                if (varDeclaration->computedBody)
+                {
+                    classInfo.methods[varDeclaration->name] = {
+                        type,
+                        {},
+                        varDeclaration->accessLevel
+                    };
+                }
+                else
+                {
+                    classInfo.fields[varDeclaration->name] = {
+                        type,
+                        varDeclaration->isWeak,
+                        varDeclaration->accessLevel
+                    };
+                }
             }
         }
         m_classes[classDecl->name] = classInfo;
@@ -535,29 +559,86 @@ private:
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
-                if (isGlobalScope())
+                if (!varDeclaration->computedBody)
                 {
-                    Emit(OP_GET_GLOBAL);
-                    Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
-                }
-                else
-                {
-                    int slot = -1;
-                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                    if (isGlobalScope())
                     {
-                        if (m_current->locals[i].name == classDecl->name)
-                        {
-                            slot = i;
-                            break;
-                        }
+                        Emit(OP_GET_GLOBAL);
+                        Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
                     }
-                    Emit(OP_GET_LOCAL);
-                    Emit(static_cast<uint8_t>(slot));
-                }
+                    else
+                    {
+                        int slot = -1;
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        {
+                            if (m_current->locals[i].name == classDecl->name)
+                            {
+                                slot = i;
+                                break;
+                            }
+                        }
+                        Emit(OP_GET_LOCAL);
+                        Emit(static_cast<uint8_t>(slot));
+                    }
 
-                Emit(OP_FIELD);
-                Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
-                Emit(OP_POP);
+                    Emit(OP_FIELD);
+                    Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                    Emit(OP_POP);
+                }
+            }
+        }
+
+        for (const auto& member : classDecl->members)
+        {
+            if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
+            {
+                if (varDeclaration->computedBody)
+                {
+                    TypeInfoPtr retType = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
+
+                    InitState(varDeclaration->name, 0, retType, TypeInfo::Class(classDecl->name));
+                    BeginScope();
+
+                    m_current->locals[0].name = "self";
+                    m_current->locals[0].type = TypeInfo::Class(classDecl->name);
+
+                    for (const auto& s : varDeclaration->computedBody->statements)
+                    {
+                        CompileStmt(s.get());
+                    }
+
+                    Emit(OP_CONSTANT);
+                    Emit(MakeConstant(false));
+                    Emit(OP_RETURN);
+                    EndScope();
+
+                    FunctionPtr compiledGetter = EndState();
+
+                    Emit(OP_CONSTANT);
+                    Emit(MakeConstant(compiledGetter));
+
+                    if (isGlobalScope())
+                    {
+                        Emit(OP_GET_GLOBAL);
+                        Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                    }
+                    else
+                    {
+                        int slot = -1;
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        {
+                            if (m_current->locals[i].name == classDecl->name)
+                            {
+                                slot = i; break;
+                            }
+                        }
+                        Emit(OP_GET_LOCAL);
+                        Emit(static_cast<uint8_t>(slot));
+                    }
+
+                    Emit(OP_METHOD);
+                    Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                }
             }
         }
     }
@@ -990,8 +1071,14 @@ private:
         if (auto* identCallee = dynamic_cast<IdentifierExpr*>(call->callee.get()))
         {
             funcName = identCallee->name;
-            if (m_classes.contains(funcName)) isConstructor = true;
-            else if (m_functions.contains(funcName)) isFunc = true;
+            if (m_classes.contains(funcName))
+            {
+                isConstructor = true;
+            }
+            else if (m_functions.contains(funcName))
+            {
+                isFunc = true;
+            }
         }
         else if (auto* getCallee = dynamic_cast<GetExpr*>(call->callee.get()))
         {
@@ -1002,6 +1089,14 @@ private:
                 if (klass.methods.contains(getCallee->propertyName))
                 {
                     const auto& method = klass.methods.at(getCallee->propertyName);
+                    if (method.accessLevel == AccessLevel::Private)
+                    {
+                        if (!m_current->currentClass || m_current->currentClass->name != objType->name)
+                        {
+                            throw std::runtime_error("Access Error at line " + std::to_string(call->line) +
+                                ": Method '" + getCallee->propertyName + "' is private and cannot be called outside of '" + objType->name + "'");
+                        }
+                    }
                     Emit(OP_GET_PROPERTY);
                     Emit(MakeConstant(std::make_shared<std::string>(getCallee->propertyName)));
 
@@ -1135,6 +1230,15 @@ private:
 
             if (klass.fields.contains(getExpr->propertyName))
             {
+                const auto& fieldInfo = klass.fields.at(getExpr->propertyName);
+                if (fieldInfo.accessLevel == AccessLevel::Private)
+                {
+                    if (!m_current->currentClass || m_current->currentClass->name != objType->name)
+                    {
+                        throw std::runtime_error("Access Error at line " + std::to_string(getExpr->line) +
+                            ": Property '" + getExpr->propertyName + "' is private and cannot be accessed outside of '" + objType->name + "'");
+                    }
+                }
                 Emit(OP_GET_PROPERTY);
                 Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
                 m_lastExprType = klass.fields.at(getExpr->propertyName).type;
@@ -1143,10 +1247,18 @@ private:
 
             if (klass.methods.contains(getExpr->propertyName))
             {
+                const auto& methodInfo = klass.methods.at(getExpr->propertyName);
+
+                if (methodInfo.accessLevel == AccessLevel::Private)
+                {
+                    if (!m_current->currentClass || m_current->currentClass->name != objType->name)
+                    {
+                        throw std::runtime_error("Access Error at line " + std::to_string(getExpr->line) +
+                            ": Property/Method '" + getExpr->propertyName + "' is private and cannot be accessed outside of '" + objType->name + "'");
+                    }
+                }
                 Emit(OP_GET_PROPERTY);
                 Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
-
-                const auto& methodInfo = klass.methods.at(getExpr->propertyName);
 
                 if (methodInfo.paramTypes.empty())
                 {
@@ -1187,6 +1299,16 @@ private:
             if (!targetType->IsCompatible(valType))
             {
                 throw std::runtime_error("Type Error at line " + std::to_string(setExpr->line) + ": Cannot assign incompatible value to property '" + setExpr->propertyName + "'");
+            }
+
+            const auto& fieldInfo = klass.fields.at(setExpr->propertyName);
+            if (fieldInfo.accessLevel == AccessLevel::Private)
+            {
+                if (!m_current->currentClass || m_current->currentClass->name != objType->name)
+                {
+                    throw std::runtime_error("Access Error at line " + std::to_string(setExpr->line) +
+                        ": Property '" + setExpr->propertyName + "' is private and cannot be accessed outside of '" + objType->name + "'");
+                }
             }
 
             if (isWeak)

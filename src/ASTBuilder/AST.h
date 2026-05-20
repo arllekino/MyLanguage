@@ -3,6 +3,7 @@
 #include <vector>
 #include <memory>
 
+#include "AccessLevel.h"
 #include "../Utils/Parameter.h"
 
 struct NumberExpr;
@@ -102,6 +103,7 @@ struct BlockStmt : Stmt
 
 struct VarDeclStmt : Stmt
 {
+    AccessLevel accessLevel = AccessLevel::Internal;
     bool isConst;
     bool isWeak = false;
     std::string name;
@@ -231,6 +233,7 @@ struct ReturnStmt : Stmt
 
 struct FuncDeclStmt : Stmt
 {
+    AccessLevel accessLevel = AccessLevel::Internal;
     std::string name;
     std::vector<Parameter> parameters;
     std::string returnType;
