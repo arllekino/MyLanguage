@@ -20,6 +20,10 @@ struct Rect {
     let perimeter: Double {
         return (self.width + self.height) * 2.0
     }
+
+    let diagonaleQuadrar: Double {
+        return self.width * self.width + self.height * self.height
+    }
 }
 
 let rect: Rect = Rect(5.0, 4.0)
