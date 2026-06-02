@@ -1,0 +1,25 @@
+let a: String?
+if (a == null) {
+    print(a)
+    print("'a' is  null")
+}
+
+let b: Int? = null
+if (b == null) {
+    print("'b' was assigned null")
+}
+
+let c: String? = "Hello, Optionals!"
+if (c != null) {
+    print("'c' has a value:")
+    print(c)
+}
+
+let d: Double? = 3.14
+print("Value before:")
+print(d)
+
+d = null
+if (d == null) {
+    print("'d' is now null!")
+}

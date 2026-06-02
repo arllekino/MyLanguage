@@ -12,6 +12,7 @@
 
 struct CallFrame
 {
+    ClosurePtr closure;
     FunctionPtr function;
     size_t ip = 0;
     size_t baseSlot = 0;
@@ -59,6 +60,7 @@ private:
     std::vector<Value> m_stack;
     std::vector<CallFrame> m_frames;
     std::unordered_map<std::string, Value> m_globals;
+    std::vector<UpvaluePtr> m_openUpvalues;
 
     uint8_t ReadByte()
     {
@@ -129,6 +131,59 @@ private:
         }
     }
 
+    UpvaluePtr CaptureUpvalue(size_t localIndex)
+    {
+        for (const auto& uv : m_openUpvalues)
+        {
+            if (uv->location == localIndex)
+            {
+                return uv;
+            }
+        }
+        auto createdUpvalue = std::make_shared<UpvalueObj>();
+        createdUpvalue->location = localIndex;
+        createdUpvalue->isClosed = false;
+        m_openUpvalues.push_back(createdUpvalue);
+        return createdUpvalue;
+    }
+
+    void CloseUpvalues(size_t lastSlot)
+    {
+        for (auto it = m_openUpvalues.begin(); it != m_openUpvalues.end(); )
+        {
+            if ((*it)->location >= lastSlot)
+            {
+                (*it)->closedValue = m_stack[(*it)->location];
+                (*it)->isClosed = true;
+                it = m_openUpvalues.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    Value CloneIfStruct(const Value& val)
+    {
+        if (std::holds_alternative<InstancePtr>(val))
+        {
+            auto instance = std::get<InstancePtr>(val);
+            if (instance && instance->klass->isStruct)
+            {
+                auto cloned = std::make_shared<Instance>();
+                cloned->klass = instance->klass;
+
+                for (const auto& [name, fieldVal] : instance->fields)
+                {
+                    cloned->fields[name] = CloneIfStruct(fieldVal);
+                }
+                return cloned;
+            }
+        }
+        return val;
+    }
+
     void Run()
     {
         for (;;) {
@@ -157,7 +212,7 @@ private:
                 {
                     Value nameVal = ReadConstant();
                     std::string name = *Expect<StringPtr>(nameVal, "Global name must be a string");
-                    m_globals[name] = Pop();
+                    m_globals[name] = CloneIfStruct(Pop());
                     break;
                 }
                 case OP_SET_GLOBAL:
@@ -166,7 +221,7 @@ private:
                     std::string name = *Expect<StringPtr>(nameVal, "Global name must be a string");
                     if (m_globals.contains(name))
                     {
-                        m_globals[name] = m_stack.back();
+                        m_globals[name] = CloneIfStruct(m_stack.back());
                     }
                     else
                     {
@@ -183,7 +238,7 @@ private:
                 case OP_SET_LOCAL:
                 {
                     uint8_t slot = ReadByte();
-                    m_stack[m_frames.back().baseSlot + slot] = m_stack.back();
+                    m_stack[m_frames.back().baseSlot + slot] = CloneIfStruct(m_stack.back());
                     break;
                 }
                 case OP_CALL:
@@ -191,12 +246,33 @@ private:
                     int argCount = ReadByte();
                     Value callee = m_stack[m_stack.size() - 1 - argCount];
 
+                    for (int i = 0; i < argCount; ++i)
+                    {
+                        size_t idx = m_stack.size() - argCount + i;
+                        m_stack[idx] = CloneIfStruct(m_stack[idx]);
+                    }
+
                     if (m_frames.size() >= FRAMES_MAX)
                     {
                         throw std::runtime_error("Stack overflow: maximum call frame depth exceeded.");
                     }
+                    if (std::holds_alternative<ClosurePtr>(callee))
+                    {
+                        ClosurePtr closure = std::get<ClosurePtr>(callee);
+                        if (argCount != closure->function->arity) {
+                            throw std::runtime_error("Expected " + std::to_string(closure->function->arity) + " args but got " + std::to_string(argCount));
+                        }
+                        CallFrame frame;
+                        frame.closure = closure;
+                        frame.function = closure->function;
+                        frame.ip = 0;
+                        frame.baseSlot = m_stack.size() - 1 - argCount;
+                        m_frames.push_back(frame);
 
-                    if (std::holds_alternative<FunctionPtr>(callee))
+                        int localsToAllocate = closure->function->maxLocals - argCount - 1;
+                        for(int i = 0; i < localsToAllocate; i++) Push(Null{});
+                    }
+                    else if (std::holds_alternative<FunctionPtr>(callee))
                     {
                         FunctionPtr func = std::get<FunctionPtr>(callee);
                         if (argCount != func->arity)
@@ -290,6 +366,7 @@ private:
                 {
                     Value result = Pop();
                     size_t baseSlot = m_frames.back().baseSlot;
+                    CloseUpvalues(baseSlot);
                     m_frames.pop_back();
 
                     if (m_frames.empty())
@@ -361,7 +438,18 @@ private:
                 {
                     const Value r = Pop();
                     const Value l = Pop();
-                    Push(l == r);
+                    if (std::holds_alternative<Null>(l) && std::holds_alternative<Null>(r))
+                    {
+                        Push(true);
+                    }
+                    else if (std::holds_alternative<Null>(l) || std::holds_alternative<Null>(r))
+                    {
+                        Push(false);
+                    }
+                    else
+                    {
+                        Push(l == r);
+                    }
                     break;
                 }
                 case OP_NOT:
@@ -451,6 +539,18 @@ private:
 
                     auto klass = std::make_shared<Klass>();
                     klass->name = className;
+
+                    Push(klass);
+                    break;
+                }
+                case OP_STRUCT:
+                {
+                    Value nameVal = ReadConstant();
+                    std::string structName = *std::get<StringPtr>(nameVal);
+
+                    auto klass = std::make_shared<Klass>();
+                    klass->name = structName;
+                    klass->isStruct = true;
 
                     Push(klass);
                     break;
@@ -547,7 +647,7 @@ private:
                         throw std::runtime_error("Error: Class '" + instance->klass->name + "' has no property '" + propName + "'.");
                     }
 
-                    instance->fields[propName] = valueToSet;
+                    instance->fields[propName] = CloneIfStruct(valueToSet);
                     Push(valueToSet);
                     break;
                 }
@@ -610,6 +710,61 @@ private:
                     bool leftBool = std::holds_alternative<bool>(l) ? std::get<bool>(l) : false;
 
                     Push(leftBool || rightBool);
+                    break;
+                }
+                case OP_CLOSURE:
+                {
+                    Value functionVal = ReadConstant();
+                    auto function = Expect<FunctionPtr>(functionVal, "OP_CLOSURE expects a function");
+                    uint8_t upvalueCount = ReadByte();
+
+                    auto closure = std::make_shared<Closure>();
+                    closure->function = function;
+
+                    for (int i = 0; i < upvalueCount; i++)
+                    {
+                        uint8_t isLocal = ReadByte();
+                        uint8_t index = ReadByte();
+
+                        if (isLocal == 1) {
+                            closure->upvalues.push_back(CaptureUpvalue(m_frames.back().baseSlot + index));
+                        } else {
+                            closure->upvalues.push_back(m_frames.back().closure->upvalues[index]);
+                        }
+                    }
+                    Push(closure);
+                    break;
+                }
+                case OP_GET_UPVALUE:
+                {
+                    uint8_t slot = ReadByte();
+                    UpvaluePtr uv = m_frames.back().closure->upvalues[slot];
+                    if (uv->isClosed)
+                    {
+                        Push(uv->closedValue);
+                    }
+                    else
+                    {
+                        Push(m_stack[uv->location]);
+                    }
+                    break;
+                }
+                case OP_SET_UPVALUE:
+                {
+                    uint8_t slot = ReadByte();
+                    UpvaluePtr uv = m_frames.back().closure->upvalues[slot];
+                    Value val = m_stack.back();
+                    if (uv->isClosed) {
+                        uv->closedValue = val;
+                    } else {
+                        m_stack[uv->location] = val;
+                    }
+                    break;
+                }
+                case OP_CLOSE_UPVALUE:
+                {
+                    CloseUpvalues(m_stack.size() - 1);
+                    Pop();
                     break;
                 }
                 default:

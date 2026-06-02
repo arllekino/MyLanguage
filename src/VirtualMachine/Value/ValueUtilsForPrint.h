@@ -42,6 +42,9 @@ inline void PrintValue(const Value& value)
             if (!v) std::cout << "null func";
             else std::cout << "<func " << v->name;
         }
-
+        else if constexpr (std::is_same_v<T, Null>)
+        {
+            std::cout << "null";
+        }
     }, value);
 }

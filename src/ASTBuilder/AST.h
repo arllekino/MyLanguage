@@ -17,6 +17,7 @@ struct IndexExpr;
 struct AssignExpr;
 struct GetExpr;
 struct SetExpr;
+struct ClosureExpr;
 struct BlockStmt;
 struct VarDeclStmt;
 struct IfStmt;
@@ -26,6 +27,7 @@ struct StructDeclStmt;
 struct ClassDeclStmt;
 struct ReturnStmt;
 struct FuncDeclStmt;
+struct NullExpr;
 
 class Visitor
 {
@@ -43,6 +45,8 @@ public:
     virtual void Visit(AssignExpr* node) = 0;
     virtual void Visit(GetExpr* node) = 0;
     virtual void Visit(SetExpr* node) = 0;
+    virtual void Visit(ClosureExpr* node) = 0;
+    virtual void Visit(NullExpr* node) = 0;
 
     virtual void Visit(BlockStmt* node) = 0;
     virtual void Visit(VarDeclStmt* node) = 0;
@@ -223,6 +227,15 @@ struct SetExpr : Expr
     void Accept(Visitor* v) override { v->Visit(this); }
 };
 
+struct ClosureExpr : Expr
+{
+    std::vector<Parameter> parameters;
+    std::string returnType;
+    std::unique_ptr<BlockStmt> body;
+
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
 struct ReturnStmt : Stmt
 {
     std::unique_ptr<Expr> value;
@@ -238,5 +251,10 @@ struct FuncDeclStmt : Stmt
     std::vector<Parameter> parameters;
     std::string returnType;
     std::unique_ptr<BlockStmt> body;
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
+struct NullExpr : Expr
+{
     void Accept(Visitor* v) override { v->Visit(this); }
 };

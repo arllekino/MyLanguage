@@ -13,6 +13,8 @@ struct Klass;
 struct Instance;
 struct BoundMethod;
 struct Null{};
+struct UpvalueObj;
+struct Closure;
 
 using StringPtr = std::shared_ptr<const std::string>;
 using ArrayPtr = std::shared_ptr<Array>;
@@ -22,6 +24,8 @@ using KlassPtr = std::shared_ptr<Klass>;
 using InstancePtr = std::shared_ptr<Instance>;
 using BoundMethodPtr = std::shared_ptr<BoundMethod>;
 using WeakInstancePtr = std::weak_ptr<Instance>;
+using UpvaluePtr = std::shared_ptr<UpvalueObj>;
+using ClosurePtr = std::shared_ptr<Closure>;
 
 using Value = std::variant<
     Null,
@@ -35,7 +39,8 @@ using Value = std::variant<
     KlassPtr,
     InstancePtr,
     BoundMethodPtr,
-    WeakInstancePtr
+    WeakInstancePtr,
+    ClosurePtr
 >;
 
 struct Array
@@ -59,6 +64,7 @@ struct NativeFunction
 struct Klass
 {
     std::string name;
+    bool isStruct = false;
     std::vector<std::string> fields;
     std::unordered_map<std::string, FunctionPtr> methods;
 };
@@ -73,4 +79,17 @@ struct BoundMethod
 {
     InstancePtr receiver;
     FunctionPtr method;
+};
+
+struct UpvalueObj
+{
+    bool isClosed = false;
+    size_t location = 0;
+    Value closedValue = Null{};
+};
+
+struct Closure
+{
+    FunctionPtr function;
+    std::vector<UpvaluePtr> upvalues;
 };

@@ -239,7 +239,7 @@ private:
             {
                 std::string paramName = Consume(TokenType::IDENTIFIER, "Expected parameter name").value;
                 Consume(TokenType::SEPARATOR, "Expected ':' after parameter name");
-                std::string paramType = Consume(TokenType::IDENTIFIER, "Expected parameter type").value;
+                std::string paramType = ParseType();
 
                 parameters.push_back({paramName, paramType});
             }
@@ -668,39 +668,51 @@ private:
 
         while (true)
         {
-            if (MatchValue(TokenType::SEPARATOR, "("))
+            if (Check(TokenType::SEPARATOR) && Peek().value == "(")
             {
-                Token opToken = Previous();
+                Token opToken = Advance();
                 std::vector<std::unique_ptr<Expr>> args;
                 if (!Check(TokenType::SEPARATOR) || Peek().value != ")")
                 {
-                    do
-                    {
-                        args.push_back(ParseExpression());
-                    }
+                    do { args.push_back(ParseExpression()); }
                     while (MatchValue(TokenType::SEPARATOR, ","));
                 }
+                Consume(TokenType::SEPARATOR, "Expected ')' after arguments");
 
-                if (!MatchValue(TokenType::SEPARATOR, ")"))
-                {
-                    throw std::runtime_error("Parse at line " + std::to_string(Peek().line) + ": Expected ')' after arguments");
-                }
                 auto callExpr = std::make_unique<CallExpr>(std::move(expr), std::move(args));
                 callExpr->line = opToken.line;
                 callExpr->column = opToken.column;
                 expr = std::move(callExpr);
             }
+            else if (Check(TokenType::SEPARATOR) && Peek().value == "{")
+            {
+                auto lambda = ParseShortLambdaExpression();
+
+                if (auto* call = dynamic_cast<CallExpr*>(expr.get()))
+                {
+                    call->arguments.push_back(std::move(lambda));
+                }
+                else
+                {
+                    unsigned line = expr->line;
+                    unsigned column = expr->column;
+
+                    std::vector<std::unique_ptr<Expr>> args;
+                    args.push_back(std::move(lambda));
+                    auto callExpr = std::make_unique<CallExpr>(std::move(expr), std::move(args));
+
+                    callExpr->line = line;
+                    callExpr->column = column;
+                    expr = std::move(callExpr);
+                }
+            }
             else if (MatchValue(TokenType::SEPARATOR, "["))
             {
                 Token opToken = Previous();
                 auto index = ParseExpression();
-                if (!MatchValue(TokenType::SEPARATOR, "]"))
-                {
-                    throw std::runtime_error("Expected ']' after index");
-                }
+                if (!MatchValue(TokenType::SEPARATOR, "]")) throw std::runtime_error("Expected ']' after index");
                 auto indexExpr = std::make_unique<IndexExpr>(std::move(expr), std::move(index));
-                indexExpr->line = opToken.line;
-                indexExpr->column = opToken.column;
+                indexExpr->line = opToken.line; indexExpr->column = opToken.column;
                 expr = std::move(indexExpr);
             }
             else if (MatchValue(TokenType::SEPARATOR, "."))
@@ -708,8 +720,7 @@ private:
                 Token opToken = Previous();
                 std::string propName = Consume(TokenType::IDENTIFIER, "Expected property name after '.'").value;
                 auto getExpr = std::make_unique<GetExpr>(std::move(expr), propName);
-                getExpr->line = opToken.line;
-                getExpr->column = opToken.column;
+                getExpr->line = opToken.line; getExpr->column = opToken.column;
                 expr = std::move(getExpr);
             }
             else
@@ -733,6 +744,26 @@ private:
         {
             expr = std::make_unique<NumberExpr>(std::stod(Previous().value), true);
         }
+        else if (!IsAtEnd() && (Peek().value == "null"))
+        {
+            Advance();
+            expr = std::make_unique<NullExpr>();
+        }
+        else if (!IsAtEnd() && Peek().value == "true")
+        {
+            Advance();
+            expr = std::make_unique<BoolExpr>(true);
+        }
+        else if (!IsAtEnd() && Peek().value == "false")
+        {
+            Advance();
+            expr = std::make_unique<BoolExpr>(false);
+        }
+        else if (!IsAtEnd() && Peek().value == "self")
+        {
+            Advance();
+            expr = std::make_unique<IdentifierExpr>("self");
+        }
         else if (Match(TokenType::IDENTIFIER))
         {
             expr = std::make_unique<IdentifierExpr>(Previous().value);
@@ -741,41 +772,35 @@ private:
         {
             expr = std::make_unique<StringExpr>(Previous().value);
         }
-        else if (MatchKeyword("true"))
+        else if (Check(TokenType::SEPARATOR) && Peek().value == "(")
         {
-            expr = std::make_unique<BoolExpr>(true);
-        }
-        else if (MatchKeyword("false"))
-        {
-            expr = std::make_unique<BoolExpr>(false);
-        }
-        else if (MatchKeyword("self"))
-        {
-            expr = std::make_unique<IdentifierExpr>("self");
-        }
-        else if (MatchValue(TokenType::SEPARATOR, "("))
-        {
-            expr = ParseExpression();
-            if (!MatchValue(TokenType::SEPARATOR, ")"))
+            if (CheckIsLambda())
             {
-                throw std::runtime_error("Expected ')' after expression");
+                expr = ParseLambdaExpression();
             }
+            else
+            {
+                Advance();
+                expr = ParseExpression();
+                if (!MatchValue(TokenType::SEPARATOR, ")"))
+                {
+                    throw std::runtime_error("Expected ')' after expression");
+                }
+            }
+        }
+        else if (Check(TokenType::SEPARATOR) && Peek().value == "{")
+        {
+            expr = ParseShortLambdaExpression();
         }
         else if (MatchValue(TokenType::SEPARATOR, "["))
         {
             std::vector<std::unique_ptr<Expr>> elements;
             if (!Check(TokenType::SEPARATOR) || Peek().value != "]")
             {
-                do
-                {
-                    elements.push_back(ParseExpression());
-                }
+                do { elements.push_back(ParseExpression()); }
                 while (MatchValue(TokenType::SEPARATOR, ","));
             }
-            if (!MatchValue(TokenType::SEPARATOR, "]"))
-            {
-                throw std::runtime_error("Expected ']' after array elements");
-            }
+            if (!MatchValue(TokenType::SEPARATOR, "]")) throw std::runtime_error("Expected ']' after array elements");
             expr = std::make_unique<ArrayExpr>(std::move(elements));
         }
         else
@@ -790,13 +815,51 @@ private:
 
     std::string ParseType()
     {
+        std::string typeStr;
+
         if (MatchValue(TokenType::SEPARATOR, "["))
         {
             std::string elementType = ParseType();
             Consume(TokenType::SEPARATOR, "Expected ']' after array type");
-            return "[" + elementType + "]";
+            typeStr = "[" + elementType + "]";
         }
-        return Consume(TokenType::IDENTIFIER, "Expected type name").value;
+        else if (MatchValue(TokenType::SEPARATOR, "("))
+        {
+            std::string funcType = "(";
+            if (!Check(TokenType::SEPARATOR) || Peek().value != ")")
+            {
+                do {
+                    funcType += ParseType();
+                    if (Check(TokenType::SEPARATOR) && Peek().value == ",") {
+                        funcType += ", ";
+                    }
+                } while (MatchValue(TokenType::SEPARATOR, ","));
+            }
+            Consume(TokenType::SEPARATOR, "Expected ')' after function types");
+            funcType += ")";
+
+            if (MatchValue(TokenType::SEPARATOR, ":"))
+            {
+                funcType += ": " + ParseType();
+            }
+            else
+            {
+                funcType += ": Void";
+            }
+
+            typeStr = funcType;
+        }
+        else
+        {
+            typeStr = Consume(TokenType::IDENTIFIER, "Expected type name").value;
+        }
+        if (!IsAtEnd() && Peek().value == "?")
+        {
+            Advance();
+            typeStr += "?";
+        }
+
+        return typeStr;
     }
 
     AccessLevel ParseAccessModifier()
@@ -810,5 +873,95 @@ private:
             return AccessLevel::Internal;
         }
         return AccessLevel::Internal;
+    }
+
+    std::unique_ptr<Expr> ParseLambdaExpression()
+    {
+        Token startToken = Consume(TokenType::SEPARATOR, "Expected '(' for lambda");
+        auto closure = std::make_unique<ClosureExpr>();
+        closure->line = startToken.line;
+        closure->column = startToken.column;
+
+        if (!Check(TokenType::SEPARATOR) || Peek().value != ")")
+        {
+            do
+            {
+                std::string paramName = Consume(TokenType::IDENTIFIER, "Expected parameter name in lambda").value;
+                Consume(TokenType::SEPARATOR, "Expected ':' after parameter name");
+                std::string paramType = ParseType();
+                closure->parameters.push_back({paramName, paramType});
+            }
+            while (MatchValue(TokenType::SEPARATOR, ","));
+        }
+        Consume(TokenType::SEPARATOR, "Expected ')' after lambda parameters");
+
+        if (MatchValue(TokenType::SEPARATOR, ":"))
+        {
+            closure->returnType = ParseType();
+        }
+        else
+        {
+            closure->returnType = "Any";
+        }
+
+        Consume(TokenType::SEPARATOR, "Expected '{' before lambda body");
+
+        auto body = std::make_unique<BlockStmt>();
+        while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
+        {
+            if (IsAtEnd()) throw std::runtime_error("Expected '}' after lambda body");
+            if (Peek().type == TokenType::COMMENT) { Advance(); continue; }
+            body->statements.push_back(ParseDeclaration());
+        }
+        Consume(TokenType::SEPARATOR, "Expected '}' after lambda body");
+
+        closure->body = std::move(body);
+        return closure;
+    }
+
+    std::unique_ptr<Expr> ParseShortLambdaExpression()
+    {
+        Token startToken = Consume(TokenType::SEPARATOR, "Expected '{' for closure");
+        auto closure = std::make_unique<ClosureExpr>();
+        closure->line = startToken.line;
+        closure->column = startToken.column;
+        closure->returnType = "Void";
+
+        auto body = std::make_unique<BlockStmt>();
+        while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
+        {
+            if (IsAtEnd()) throw std::runtime_error("Expected '}' after closure body");
+            if (Peek().type == TokenType::COMMENT) { Advance(); continue; }
+            body->statements.push_back(ParseDeclaration());
+        }
+        Consume(TokenType::SEPARATOR, "Expected '}' after closure body");
+
+        closure->body = std::move(body);
+        return closure;
+    }
+
+    [[nodiscard]] bool CheckIsLambda() const
+    {
+        int temp = m_current + 1;
+
+        if (temp < m_tokens.size() && m_tokens[temp].value == ")")
+        {
+            temp++;
+            if (temp < m_tokens.size() && (m_tokens[temp].value == "{" || m_tokens[temp].value == ":"))
+            {
+                return true;
+            }
+        }
+
+        if (temp < m_tokens.size() && m_tokens[temp].type == TokenType::IDENTIFIER)
+        {
+            temp++;
+            if (temp < m_tokens.size() && m_tokens[temp].value == ":")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 };

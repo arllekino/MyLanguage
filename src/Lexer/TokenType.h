@@ -15,5 +15,4 @@ enum class TokenType
     END_OF_FILE,
     OPTIONAL,
     FORCE_UNWRAP,
-
 };

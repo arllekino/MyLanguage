@@ -1,0 +1,45 @@
+class VStack {
+    init(spacing: Int, content: (): Void) {
+        print("VStack created with spacing:")
+        print(spacing)
+        content()
+    }
+}
+
+let myStack = VStack(20) {
+    print("Inside VStack constructor")
+}
+
+let myAnotherStack = VStack(24, { print("Inside another VStack constructor") })
+
+class Container {
+    init(content: (): Void) {
+        print("Container created. Content result:")
+        content()
+    }
+}
+
+let myContainer = Container {
+    print("Inside Container constructor!")
+}
+
+class Button {
+    let title: String
+
+    init(t: String) {
+        self.title = t
+        print("Button initialized")
+        print(self.title)
+    }
+
+    func onClick(action: (): Void): Void {
+        print("Executing action for button...")
+        action()
+    }
+}
+
+let btn = Button("Submit")
+
+btn.onClick {
+    print("Button was clicked!")
+}

@@ -27,3 +27,12 @@ account.deposit(500.0) // 195
 
 // account.balance = 9999.0
 // Access Error at line 28: Property 'balance' is private and cannot be accessed outside of 'BankAccount'
+
+let lambda = (arg: Int): Int {
+}
+
+let lambda1 = (arg: Int) {
+}
+
+let lambda2 = (arg: Int): Void {
+}

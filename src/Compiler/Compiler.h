@@ -41,12 +41,21 @@ private:
         int depth;
         bool isConst;
         TypeInfoPtr type;
+        bool isCaptured = false;
+    };
+
+    struct Upvalue
+    {
+        uint8_t index;
+        bool isLocal;
+        TypeInfoPtr type;
     };
 
     struct CompilerState
     {
         FunctionPtr function;
         std::vector<Local> locals;
+        std::vector<Upvalue> upvalues;
         int maxLocals = 0;
         int scopeDepth = 0;
         TypeInfoPtr returnType;
@@ -92,6 +101,12 @@ private:
     {
         if (name.empty() || name == "Any") return TypeInfo::Simple(TypeKind::Any);
 
+        if (name.back() == '?')
+        {
+            std::string inner = name.substr(0, name.size() - 1);
+            return TypeInfo::Optional(ResolveType(inner));
+        }
+
         if (name.front() == '[' && name.back() == ']')
         {
             std::string inner = name.substr(1, name.size() - 2);
@@ -128,7 +143,74 @@ private:
         {
             return TypeInfo::Class(name);
         }
+        if (name.front() == '(')
+        {
+            int balance = 0;
+            size_t closeParen = 0;
+            for (size_t i = 0; i < name.size(); ++i)
+            {
+                if (name[i] == '(')
+                {
+                    balance++;
+                }
+                else if (name[i] == ')')
+                {
+                    balance--;
+                    if (balance == 0)
+                    {
+                        closeParen = i;
+                        break;
+                    }
+                }
+            }
 
+            std::string paramsStr = name.substr(1, closeParen - 1);
+            std::vector<TypeInfoPtr> paramTypes;
+
+            if (!paramsStr.empty())
+            {
+                size_t start = 0, nest = 0;
+                for (size_t i = 0; i < paramsStr.size(); ++i)
+                {
+                    if (paramsStr[i] == '(' || paramsStr[i] == '[')
+                    {
+                        nest++;
+                    }
+                    else if (paramsStr[i] == ')' || paramsStr[i] == ']')
+                    {
+                        nest--;
+                    }
+                    else if (paramsStr[i] == ',' && nest == 0)
+                    {
+                        std::string p = paramsStr.substr(start, i - start);
+                        p.erase(0, p.find_first_not_of(' '));
+                        p.erase(p.find_last_not_of(' ') + 1);
+                        paramTypes.push_back(ResolveType(p));
+                        start = i + 1;
+                    }
+                }
+                std::string p = paramsStr.substr(start);
+                p.erase(0, p.find_first_not_of(' '));
+                p.erase(p.find_last_not_of(' ') + 1);
+                if (!p.empty())
+                {
+                    paramTypes.push_back(ResolveType(p));
+                }
+            }
+
+            size_t colonPos = name.find(':', closeParen);
+            std::string retStr = "Void";
+            if (colonPos != std::string::npos)
+            {
+                retStr = name.substr(colonPos + 1);
+                retStr.erase(0, retStr.find_first_not_of(' '));
+            }
+
+            auto funcType = TypeInfo::Simple(TypeKind::Func);
+            funcType->paramTypes = paramTypes;
+            funcType->returnType = ResolveType(retStr);
+            return funcType;
+        }
         throw std::runtime_error("Unknown type '" + name + "'");
     }
 
@@ -181,7 +263,14 @@ private:
         m_current->scopeDepth--;
         while (!m_current->locals.empty() && m_current->locals.back().depth > m_current->scopeDepth)
         {
-            Emit(OP_POP);
+            if (m_current->locals.back().isCaptured)
+            {
+                Emit(OP_CLOSE_UPVALUE);
+            }
+            else
+            {
+                Emit(OP_POP);
+            }
             m_current->locals.pop_back();
         }
     }
@@ -239,8 +328,8 @@ private:
         else
         {
             Emit(OP_CONSTANT);
-            Emit(MakeConstant(false)); // по-хорошему здесь должен быть Null{}
-            initType = TypeInfo::Simple(TypeKind::Optional);
+            Emit(MakeConstant(Null{}));
+            initType = TypeInfo::Simple(TypeKind::Null);
         }
 
         TypeInfoPtr finalType = initType;
@@ -675,7 +764,7 @@ private:
         structInfo.methods["init"] = { TypeInfo::Class(structDecl->name), initParamTypes };
         m_classes[structDecl->name] = structInfo;
 
-        Emit(OP_CLASS);
+        Emit(OP_STRUCT);
         Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
 
         if (isGlobalScope())
@@ -841,50 +930,53 @@ private:
     {
         if (auto* ident = dynamic_cast<IdentifierExpr*>(assign->target.get()))
         {
-            int slot = -1;
             TypeInfoPtr varType = TypeInfo::Simple(TypeKind::Any);
+            int slot = ResolveLocal(m_current, ident->name);
+            int upvalue = -1;
 
-            for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+            if (slot != -1)
             {
-                if (m_current->locals[i].name == ident->name)
+                if (m_current->locals[slot].isConst)
                 {
-                    if (m_current->locals[i].isConst)
-                    {
-                        throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Cannot reassign to constant '" + ident->name + "'");
-                    }
-                    slot = i;
-                    varType = m_current->locals[i].type;
-                    break;
+                    throw std::runtime_error("Cannot reassign to const");
                 }
+                varType = m_current->locals[slot].type;
             }
-
-            if (slot == -1)
+            else
             {
-                if (m_globalVariables.contains(ident->name))
+                upvalue = ResolveUpvalue(m_current, ident->name, varType);
+                if (upvalue == -1)
                 {
-                    if (m_globalVariables[ident->name].isConst)
+                    if (m_globalVariables.contains(ident->name))
                     {
-                        throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Cannot reassign to global constant '" + ident->name + "'");
+                        if (m_globalVariables[ident->name].isConst)
+                        {
+                            throw std::runtime_error("Cannot reassign to global const");
+                        }
+                        varType = m_globalVariables[ident->name].type;
                     }
-                    varType = m_globalVariables[ident->name].type;
-                }
-                else
-                {
-                    throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Variable '" + ident->name + "' is not declared");
+                    else
+                    {
+                        throw std::runtime_error("Undefined variable '" + ident->name + "'");
+                    }
                 }
             }
 
             TypeInfoPtr valType = CompileExpr(assign->value.get());
-
             if (!varType->IsCompatible(valType))
             {
-                throw std::runtime_error("Type Error at line " + std::to_string(assign->line) + ": Cannot assign incompatible value to variable '" + ident->name + "'");
+                throw std::runtime_error("Type Error: Incompatible assignment");
             }
 
             if (slot != -1)
             {
                 Emit(OP_SET_LOCAL);
                 Emit(static_cast<uint8_t>(slot));
+            }
+            else if (upvalue != -1)
+            {
+                Emit(OP_SET_UPVALUE);
+                Emit(static_cast<uint8_t>(upvalue));
             }
             else
             {
@@ -1010,56 +1102,54 @@ private:
 
     void Visit(IdentifierExpr* ident) override
     {
-        if (ident->name == "self")
-        {
-            if (!m_current->currentClass)
-            {
-                throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Cannot use 'self' outside of a class method");
-            }
+        if (ident->name == "self") {
+            if (!m_current->currentClass) throw std::runtime_error("Cannot use 'self' outside class");
         }
 
-        int slot = -1;
+        int slot = ResolveLocal(m_current, ident->name);
         TypeInfoPtr typeOut = TypeInfo::Simple(TypeKind::Any);
-
-        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
-        {
-            if (m_current->locals[i].name == ident->name)
-            {
-                slot = i;
-                typeOut = m_current->locals[i].type;
-                break;
-            }
-        }
 
         if (slot != -1)
         {
             Emit(OP_GET_LOCAL);
             Emit(static_cast<uint8_t>(slot));
-            m_lastExprType = typeOut;
+            typeOut = m_current->locals[slot].type;
         }
         else
         {
-            if (m_globalVariables.contains(ident->name))
+            int upvalue = ResolveUpvalue(m_current, ident->name, typeOut);
+            if (upvalue != -1)
             {
-                typeOut = m_globalVariables[ident->name].type;
-            }
-            else if (m_classes.contains(ident->name))
-            {
-                typeOut = TypeInfo::Class(ident->name);
-            }
-            else if (m_functions.contains(ident->name))
-            {
-                typeOut = TypeInfo::Simple(TypeKind::Func);
+                Emit(OP_GET_UPVALUE);
+                Emit(static_cast<uint8_t>(upvalue));
             }
             else
             {
-                throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Undefined identifier '" + ident->name + "'");
-            }
+                if (m_globalVariables.contains(ident->name))
+                {
+                    typeOut = m_globalVariables[ident->name].type;
+                }
+                else if (m_classes.contains(ident->name))
+                {
+                    typeOut = TypeInfo::Class(ident->name);
+                }
+                else if (m_functions.contains(ident->name))
+                {
+                    auto funcType = TypeInfo::Simple(TypeKind::Func);
+                    funcType->paramTypes = m_functions[ident->name].paramTypes;
+                    funcType->returnType = m_functions[ident->name].returnType;
+                    typeOut = funcType;
+                }
+                else
+                {
+                    throw std::runtime_error("Compiler Error at line " + std::to_string(ident->line) + ": Undefined identifier '" + ident->name + "'");
+                }
 
-            Emit(OP_GET_GLOBAL);
-            Emit(MakeConstant(std::make_shared<std::string>(ident->name)));
-            m_lastExprType = typeOut;
+                Emit(OP_GET_GLOBAL);
+                Emit(MakeConstant(std::make_shared<std::string>(ident->name)));
+            }
         }
+        m_lastExprType = typeOut;
     }
 
     void Visit(CallExpr* call) override
@@ -1328,5 +1418,116 @@ private:
         Emit(OP_SET_PROPERTY);
         Emit(MakeConstant(std::make_shared<std::string>(setExpr->propertyName)));
         m_lastExprType = TypeInfo::Simple(TypeKind::Any);
+    }
+
+    void Visit(ClosureExpr* closure) override
+    {
+        static int closureCount = 0;
+        std::string name = "anon_closure_" + std::to_string(closureCount++);
+
+        TypeInfoPtr retType = ResolveType(closure->returnType);
+        std::vector<TypeInfoPtr> paramTypes;
+        paramTypes.reserve(closure->parameters.size());
+        for (const auto& param : closure->parameters)
+        {
+            paramTypes.push_back(ResolveType(param.type));
+        }
+
+        InitState(name, static_cast<int>(closure->parameters.size()), retType);
+        BeginScope();
+
+        for (const auto& param : closure->parameters)
+        {
+            m_current->locals.push_back({param.name, m_current->scopeDepth, true, ResolveType(param.type)});
+            m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+        }
+
+        for (const auto& s : closure->body->statements)
+        {
+            CompileStmt(s.get());
+        }
+
+        Emit(OP_CONSTANT);
+        Emit(MakeConstant(false));
+        Emit(OP_RETURN);
+
+        EndScope();
+
+        std::vector<Upvalue> capturedUpvalues = m_current->upvalues;
+        FunctionPtr compiledClosure = EndState();
+
+        Emit(OP_CLOSURE);
+        Emit(MakeConstant(compiledClosure));
+        Emit(static_cast<uint8_t>(capturedUpvalues.size()));
+
+        for (const auto& uv : capturedUpvalues)
+        {
+            Emit(uv.isLocal ? 1 : 0);
+            Emit(uv.index);
+        }
+
+        auto funcType = TypeInfo::Simple(TypeKind::Func);
+        funcType->paramTypes = paramTypes;
+        funcType->returnType = retType;
+        m_lastExprType = funcType;
+    }
+
+    void Visit(NullExpr* expr) override
+    {
+        Emit(OP_CONSTANT);
+        Emit(MakeConstant(Null{}));
+        m_lastExprType = TypeInfo::Simple(TypeKind::Null);
+    }
+
+    int ResolveLocal(CompilerState* state, const std::string& name)
+    {
+        for (int i = static_cast<int>(state->locals.size()) - 1; i >= 0; --i)
+        {
+            if (state->locals[i].name == name)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    int AddUpvalue(CompilerState* state, uint8_t index, bool isLocal, TypeInfoPtr type)
+    {
+        int upvalueCount = static_cast<int>(state->upvalues.size());
+
+        for (int i = 0; i < upvalueCount; i++)
+        {
+            if (state->upvalues[i].index == index && state->upvalues[i].isLocal == isLocal)
+            {
+                return i;
+            }
+        }
+
+        state->upvalues.push_back({index, isLocal, type});
+        return upvalueCount;
+    }
+
+    int ResolveUpvalue(CompilerState* state, const std::string& name, TypeInfoPtr& outType)
+    {
+        if (state->parent == nullptr)
+        {
+            return -1;
+        }
+
+        int local = ResolveLocal(state->parent, name);
+        if (local != -1)
+        {
+            state->parent->locals[local].isCaptured = true;
+            outType = state->parent->locals[local].type;
+            return AddUpvalue(state, static_cast<uint8_t>(local), true, outType);
+        }
+
+        int upvalue = ResolveUpvalue(state->parent, name, outType);
+        if (upvalue != -1)
+        {
+            return AddUpvalue(state, static_cast<uint8_t>(upvalue), false, outType);
+        }
+
+        return -1;
     }
 };

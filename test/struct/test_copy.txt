@@ -1,0 +1,21 @@
+struct Point {
+    let x: Int
+    let y: Int
+}
+
+let a = Point(10, 20)
+let b = a
+
+b.x = 99
+
+print(a.x) // 10
+print(b.x) // 99
+
+func mutatePoint(p: Point): Void {
+    p.x = 555
+    print(p.x) // 555
+}
+
+let c = Point(100, 200)
+mutatePoint(c)
+print(c.x) // 100

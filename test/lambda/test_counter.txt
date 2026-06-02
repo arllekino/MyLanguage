@@ -1,0 +1,13 @@
+// Указываем строгий тип возвращаемого значения: функция без аргументов, возвращающая Int
+func makeCounter(): (): Int {
+    let count = 0
+    let counter = (): Int {
+        count = count + 1
+        return count
+    }
+    return counter
+}
+
+let c = makeCounter()
+print(c()) // Ожидается 1
+print(c()) // Ожидается 2

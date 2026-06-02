@@ -1,0 +1,3 @@
+// let error1: String = null
+let error2: Int = 42
+let myOpt: Int? = error2

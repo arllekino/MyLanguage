@@ -27,10 +27,16 @@ enum OpCode : uint8_t
     OP_SET_PROPERTY_WEAK,
 
     OP_CLASS,
+    OP_STRUCT,
     OP_FIELD,
     OP_METHOD,
     OP_GET_PROPERTY,
     OP_SET_PROPERTY,
+
+    OP_CLOSURE,
+    OP_GET_UPVALUE,
+    OP_SET_UPVALUE,
+    OP_CLOSE_UPVALUE,
 
     OP_RETURN = 255
 };
