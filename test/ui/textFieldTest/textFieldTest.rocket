@@ -1,0 +1,40 @@
+import UI
+
+class FormViewModel {
+    let inputText: String
+
+    init() {
+        self.inputText = ""
+    }
+
+    func setText(text: String) {
+        self.inputText = text
+    }
+}
+
+struct FormView: View {
+    let vm: FormViewModel
+
+    let body: any View {
+        return VBox(16.0) {
+            return [
+                Text("Type something:", 20.0, Color.white),
+                TextField("inputField", self.vm.inputText, 300.0) {
+                    self.vm.setText(it)
+                },
+                Text(self.vm.inputText, 16.0, Color.green)
+            ]
+        }
+    }
+
+    init(vm: FormViewModel) {
+        self.vm = vm
+    }
+}
+
+let vm = FormViewModel()
+let app = App()
+
+app.run("TextField Test") {
+    return FormView(vm)
+}

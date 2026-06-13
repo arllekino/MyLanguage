@@ -75,6 +75,7 @@ struct Klass
     bool isStruct = false;
     std::vector<std::string> fields;
     std::unordered_map<std::string, FunctionPtr> methods;
+    std::unordered_map<std::string, Value> staticFields;
 };
 
 struct Instance

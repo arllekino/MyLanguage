@@ -1,0 +1,24 @@
+import UI
+
+struct MyView: View {
+    let body: any View {
+        return VBox(16.0) {
+            return [
+                Text("Hello, Rocket UI!", 24.0, Color.white),
+                HBox(12.0) {
+                    return [
+                        Button("Add Task", Color.blue) { },
+                        Button("Clear", Color.red) { }
+                    ]
+                },
+                Text("No tasks yet.", 16.0, Color.gray)
+            ]
+        }
+    }
+}
+
+let app = App()
+
+app.run("Text Test") {
+    return MyView()
+}

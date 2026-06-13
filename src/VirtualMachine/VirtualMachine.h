@@ -644,6 +644,18 @@ private:
                     klass->fields.push_back(fieldName);
                     break;
                 }
+                case OP_STATIC_FIELD:
+                {
+                    Value fieldNameVal = ReadConstant();
+                    std::string fieldName = *std::get<StringPtr>(fieldNameVal);
+
+                    Value klassVal  = Pop(); // klass is on top (pushed after value)
+                    Value fieldValue = Pop(); // value is below
+                    auto klass = Expect<KlassPtr>(klassVal, "OP_STATIC_FIELD expects a class");
+
+                    klass->staticFields[fieldName] = fieldValue;
+                    break;
+                }
                 case OP_METHOD:
                 {
                     Value methodNameVal = ReadConstant();
@@ -664,6 +676,59 @@ private:
                     std::string propName = *std::get<StringPtr>(nameVal);
 
                     Value instanceVal = m_stack.back();
+
+                    if (std::holds_alternative<KlassPtr>(instanceVal))
+                    {
+                        auto klass = std::get<KlassPtr>(instanceVal);
+                        Pop();
+                        if (klass->staticFields.contains(propName))
+                        {
+                            Push(klass->staticFields[propName]);
+                        }
+                        else
+                        {
+                            throw std::runtime_error("No static field '" + propName + "' on type '" + klass->name + "'.");
+                        }
+                        break;
+                    }
+
+                    if (std::holds_alternative<StringPtr>(instanceVal))
+                    {
+                        Pop();
+                        auto str = std::get<StringPtr>(instanceVal);
+
+                        if (propName == "count") {
+                            Push(static_cast<int64_t>(str->size()));
+                            break;
+                        }
+
+                        auto bound = std::make_shared<NativeBoundMethod>();
+                        bound->receiver = instanceVal;
+
+                        if (propName == "dropLast") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                if (s->empty()) return std::make_shared<std::string>("");
+                                return std::make_shared<std::string>(s->substr(0, s->size() - 1));
+                            };
+                        } else if (propName == "isEmpty") {
+                            Push(str->empty());
+                            break;
+                        } else if (propName == "trimmed") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                size_t start = s->find_first_not_of(" \t\n\r");
+                                size_t end   = s->find_last_not_of(" \t\n\r");
+                                if (start == std::string::npos) return std::make_shared<std::string>("");
+                                return std::make_shared<std::string>(s->substr(start, end - start + 1));
+                            };
+                        } else {
+                            throw std::runtime_error("String has no property '" + propName + "'");
+                        }
+
+                        Push(bound);
+                        break;
+                    }
 
                     if (std::holds_alternative<ArrayPtr>(instanceVal))
                     {
@@ -1033,6 +1098,88 @@ private:
                 m_uiRenderer.EndFrame();
             }
             return Null{};
+        });
+
+        DefineNative("UIDrawText", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return Null{};
+            double x    = AsDouble(args[0], "x");
+            double y    = AsDouble(args[1], "y");
+            auto   text = Expect<StringPtr>(args[2], "text must be String");
+            double size = AsDouble(args[3], "size");
+            double r    = AsDouble(args[4], "r");
+            double g    = AsDouble(args[5], "g");
+            double b    = AsDouble(args[6], "b");
+            m_uiRenderer.DrawText(
+                static_cast<float>(x), static_cast<float>(y),
+                *text, static_cast<float>(size),
+                glm::vec4(r, g, b, 1.0f)
+            );
+            return Null{};
+        });
+
+        DefineNative("UIMeasureTextWidth", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return 0.0;
+            auto   text = Expect<StringPtr>(args[0], "text must be String");
+            double size = AsDouble(args[1], "size");
+            return static_cast<double>(
+                m_uiRenderer.MeasureTextWidth(*text, static_cast<float>(size))
+            );
+        });
+
+        DefineNative("UIGetMouseX", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return 0.0;
+            return static_cast<double>(m_uiRenderer.mouseX);
+        });
+
+        DefineNative("UIGetMouseY", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return 0.0;
+            return static_cast<double>(m_uiRenderer.mouseY);
+        });
+
+        DefineNative("UIIsMouseDown", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            return m_uiRenderer.mouseDown;
+        });
+
+        DefineNative("UIIsMouseJustPressed", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            return m_uiRenderer.IsMouseJustPressed();
+        });
+
+        DefineNative("UIGetPendingText", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return std::make_shared<std::string>("");
+            return std::make_shared<std::string>(m_uiRenderer.pendingText);
+        });
+
+        DefineNative("UIIsBackspacePressed", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            return m_uiRenderer.backspacePressed;
+        });
+
+        DefineNative("UIIsEnterPressed", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            return m_uiRenderer.enterPressed;
+        });
+
+        DefineNative("UISetFocused", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            if (args.empty()) { m_uiRenderer.ClearFocus(); return false; }
+            auto id = std::get<StringPtr>(args[0]);
+            m_uiRenderer.SetFocused(*id);
+            return true;
+        });
+
+        DefineNative("UIIsFocused", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            if (args.empty()) return false;
+            auto id = std::get<StringPtr>(args[0]);
+            return m_uiRenderer.IsFocused(*id);
+        });
+
+        DefineNative("UIClearFocus", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            m_uiRenderer.ClearFocus();
+            return false;
         });
     }
 };

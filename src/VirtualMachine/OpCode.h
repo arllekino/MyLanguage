@@ -29,6 +29,7 @@ enum OpCode : uint8_t
     OP_CLASS,
     OP_STRUCT,
     OP_FIELD,
+    OP_STATIC_FIELD,
     OP_METHOD,
     OP_GET_PROPERTY,
     OP_SET_PROPERTY,

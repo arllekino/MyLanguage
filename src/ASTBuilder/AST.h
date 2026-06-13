@@ -114,6 +114,7 @@ struct VarDeclStmt : Stmt
     AccessLevel accessLevel = AccessLevel::Internal;
     bool isConst;
     bool isWeak = false;
+    bool isStatic = false;
     std::string name;
     std::string typeName;
     std::unique_ptr<Expr> initExpr;

@@ -62,6 +62,8 @@ add_executable(MyLanguage
         src/Signature/Signature.h
         src/ASTBuilder/AccessLevel.h
         src/Graphics/UIRenderer.h
+        src/Graphics/Utils/TextRenderer.h
+        src/Graphics/Utils/stb_truetype.h
         src/Graphics/View/ViewNode.h
         src/Graphics/View/VBoxNode.h
         src/Graphics/View/Shapes/Rect.h

@@ -55,6 +55,35 @@ public:
             TypeInfo::Simple(TypeKind::Void),
             {}
         };
+
+        m_functions["UIDrawText"] = {
+            TypeInfo::Simple(TypeKind::Void),
+            {
+                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::String),
+                TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double)
+            }
+        };
+
+        m_functions["UIMeasureTextWidth"] = {
+            TypeInfo::Simple(TypeKind::Double),
+            { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::Double) }
+        };
+
+        m_functions["UIGetMouseX"] = { TypeInfo::Simple(TypeKind::Double), {} };
+        m_functions["UIGetMouseY"] = { TypeInfo::Simple(TypeKind::Double), {} };
+        m_functions["UIIsMouseDown"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+        m_functions["UIIsMouseJustPressed"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+
+        m_functions["UIGetPendingText"] = { TypeInfo::Simple(TypeKind::String), {} };
+        m_functions["UIIsBackspacePressed"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+        m_functions["UIIsEnterPressed"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+
+        m_functions["UISetFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["UIIsFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["UIClearFocus"] = { TypeInfo::Simple(TypeKind::Bool), {} };
     }
     FunctionPtr Compile(const std::vector<std::unique_ptr<Stmt>>& ast)
     {
@@ -128,6 +157,7 @@ private:
         std::vector<std::string> implementedInterfaces;
         std::unordered_map<std::string, FieldInfo> fields;
         std::unordered_map<std::string, FuncInfo> methods;
+        std::unordered_set<std::string> staticFieldNames; // names only; values live in the Klass at runtime
     };
 
     struct InterfaceInfo
@@ -811,6 +841,11 @@ private:
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
+                if (varDeclaration->isStatic)
+                {
+                    structInfo.staticFieldNames.insert(varDeclaration->name);
+                    continue;
+                }
                 TypeInfoPtr type = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
                 if (varDeclaration->computedBody) structInfo.methods[varDeclaration->name] = { type, {}, varDeclaration->accessLevel };
                 else structInfo.fields[varDeclaration->name] = { type, varDeclaration->isWeak, varDeclaration->accessLevel };
@@ -867,6 +902,8 @@ private:
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
+                if (varDeclaration->isStatic) continue; // static fields handled after all members
+
                 if (!varDeclaration->computedBody)
                 {
                     if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
@@ -900,6 +937,27 @@ private:
                     Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
                 }
             }
+        }
+
+        // Emit static field initializations after all instance members are defined
+        for (const auto& member : structDecl->members)
+        {
+            auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get());
+            if (!varDeclaration || !varDeclaration->isStatic || !varDeclaration->initExpr) continue;
+
+            CompileExpr(varDeclaration->initExpr.get());
+
+            if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+            else
+            {
+                int slot = -1;
+                for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                {
+                    if (m_current->locals[i].name == structDecl->name) { slot = i; break; }
+                }
+                Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+            }
+            Emit(OP_STATIC_FIELD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
         }
     }
 
@@ -1360,6 +1418,14 @@ private:
                 Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
 
                 m_lastExprType = TypeInfo::Simple(TypeKind::Func);
+                return;
+            }
+            if (klass.staticFieldNames.contains(getExpr->propertyName))
+            {
+                // Static field: object on stack is the Klass itself; OP_GET_PROPERTY handles KlassPtr
+                Emit(OP_GET_PROPERTY);
+                Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+                m_lastExprType = TypeInfo::Class(objType->name);
                 return;
             }
             throw std::runtime_error("Compiler Error at line " + std::to_string(getExpr->line) + ": Class/Struct '" + objType->name + "' has no property or method '" + getExpr->propertyName + "'");

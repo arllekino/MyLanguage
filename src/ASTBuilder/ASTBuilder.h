@@ -276,7 +276,17 @@ private:
 
             AccessLevel accessLevel = ParseAccessModifier();
 
-            if (MatchKeyword("let") || MatchKeyword("const"))
+            if (MatchKeyword("static"))
+            {
+                if (!(MatchKeyword("let") || MatchKeyword("const")))
+                    throw std::runtime_error("Expected 'let' or 'const' after 'static'");
+                auto varNode = ParseVarDeclaration(Previous().value == "const");
+                auto* v = dynamic_cast<VarDeclStmt*>(varNode.get());
+                v->accessLevel = accessLevel;
+                v->isStatic = true;
+                structDecl->members.push_back(std::move(varNode));
+            }
+            else if (MatchKeyword("let") || MatchKeyword("const"))
             {
                 auto varNode = ParseVarDeclaration(Previous().value == "const");
                 dynamic_cast<VarDeclStmt*>(varNode.get())->accessLevel = accessLevel;
