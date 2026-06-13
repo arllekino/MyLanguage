@@ -99,6 +99,14 @@ private:
 
     std::unique_ptr<Stmt> ParseDeclaration()
     {
+        if (MatchKeyword("import"))
+        {
+            return ParseImport();
+        }
+        if (MatchKeyword("interface"))
+        {
+            return ParseInterfaceDeclaration();
+        }
         if (MatchKeyword("class"))
         {
             return ParseClassDeclaration();
@@ -118,13 +126,75 @@ private:
         return ParseStatement();
     }
 
+    std::unique_ptr<Stmt> ParseInterfaceDeclaration()
+    {
+        Token startToken = Previous();
+        auto nameToken = Consume(TokenType::IDENTIFIER, "Expected interface name");
+        Consume(TokenType::SEPARATOR, "Expected '{' before interface body");
+
+        auto interfaceDecl = std::make_unique<InterfaceDeclStmt>();
+        interfaceDecl->line = startToken.line;
+        interfaceDecl->column = startToken.column;
+        interfaceDecl->name = nameToken.value;
+
+        while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
+        {
+            if (IsAtEnd()) throw std::runtime_error("Expected '}' after interface body");
+            if (Peek().type == TokenType::COMMENT) { Advance(); continue; }
+
+            if (MatchKeyword("func"))
+            {
+                auto funcNode = ParseFuncDeclaration(false, false);
+                interfaceDecl->methods.push_back(
+                    std::unique_ptr<FuncDeclStmt>(dynamic_cast<FuncDeclStmt*>(funcNode.release()))
+                );
+            }
+            else if (MatchKeyword("let"))
+            {
+                Token varStartToken = Previous();
+                auto anotherNameToken = Consume(TokenType::IDENTIFIER, "Expected property name in interface");
+                Consume(TokenType::SEPARATOR, "Expected ':' after property name");
+                std::string typeName = ParseType();
+
+                auto varDecl = std::make_unique<VarDeclStmt>();
+                varDecl->line = varStartToken.line;
+                varDecl->column = varStartToken.column;
+                varDecl->name = anotherNameToken.value;
+                varDecl->isConst = true;
+                varDecl->typeName = typeName;
+
+                interfaceDecl->properties.push_back(std::move(varDecl));
+            }
+            else
+            {
+                throw std::runtime_error("Parse Error: Only 'func' and 'let' are allowed in interfaces.");
+            }
+        }
+        Consume(TokenType::SEPARATOR, "Expected '}' after interface body");
+
+        return interfaceDecl;
+    }
+
     std::unique_ptr<Stmt> ParseClassDeclaration()
     {
         Token startToken = Previous();
         auto nameToken = Consume(TokenType::IDENTIFIER, "Expected class name");
+        auto classDecl = std::make_unique<ClassDeclStmt>();
+
+        if (Check(TokenType::SEPARATOR) && Peek().value == ":")
+        {
+            std::vector<std::string> implementedInterfaces;
+            Advance();
+            do
+            {
+                auto idToken = Consume(TokenType::IDENTIFIER, "Expected interface name after ':'");
+                implementedInterfaces.push_back(idToken.value);
+            }
+            while (Check(TokenType::SEPARATOR) && Peek().value == "," && (Advance(), true));
+            classDecl->implementedInterfaces = implementedInterfaces;
+        }
         Consume(TokenType::SEPARATOR, "Expected '{' before class body");
 
-        auto classDecl = std::make_unique<ClassDeclStmt>();
         classDecl->line = startToken.line;
         classDecl->column = startToken.column;
         classDecl->name = nameToken.value;
@@ -175,9 +245,19 @@ private:
     {
         Token startToken = Previous();
         auto nameToken = Consume(TokenType::IDENTIFIER, "Expected struct name");
+        auto structDecl = std::make_unique<StructDeclStmt>();
+
+        if (MatchValue(TokenType::SEPARATOR, ":"))
+        {
+            do
+            {
+                structDecl->implementedInterfaces.push_back(Consume(TokenType::IDENTIFIER, "Expected interface name").value);
+            }
+            while (MatchValue(TokenType::SEPARATOR, ","));
+        }
+
         Consume(TokenType::SEPARATOR, "Expected '{' before struct body");
 
-        auto structDecl = std::make_unique<StructDeclStmt>();
         structDecl->line = startToken.line;
         structDecl->column = startToken.column;
         structDecl->name = nameToken.value;
@@ -199,16 +279,24 @@ private:
             if (MatchKeyword("let") || MatchKeyword("const"))
             {
                 auto varNode = ParseVarDeclaration(Previous().value == "const");
-                auto varStmt = dynamic_cast<VarDeclStmt*>(varNode.get());
-                varStmt->accessLevel = accessLevel;
-
-                structDecl->members.push_back(
-                    std::unique_ptr<VarDeclStmt>(static_cast<VarDeclStmt*>(varNode.release()))
-                );
+                dynamic_cast<VarDeclStmt*>(varNode.get())->accessLevel = accessLevel;
+                structDecl->members.push_back(std::move(varNode));
+            }
+            else if (MatchKeyword("init"))
+            {
+                auto funcNode = ParseFuncDeclaration(true);
+                dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
+                structDecl->members.push_back(std::move(funcNode));
+            }
+            else if (MatchKeyword("func"))
+            {
+                auto funcNode = ParseFuncDeclaration(false);
+                dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
+                structDecl->members.push_back(std::move(funcNode));
             }
             else
             {
-                throw std::runtime_error("Parse Error: Only variables and computed properties are allowed inside a struct.");
+                throw std::runtime_error("Parse Error: Only variables and functions are allowed inside a struct.");
             }
         }
         Consume(TokenType::SEPARATOR, "Expected '}' after struct body");
@@ -216,7 +304,7 @@ private:
         return structDecl;
     }
 
-    std::unique_ptr<Stmt> ParseFuncDeclaration(const bool isInit)
+    std::unique_ptr<Stmt> ParseFuncDeclaration(const bool isInit, bool requireBody = true)
     {
         Token startToken = Previous();
         std::string funcName;
@@ -254,8 +342,12 @@ private:
             returnType = ParseType();
         }
 
-        Consume(TokenType::SEPARATOR, "Expected '{' before function body");
-        auto body = ParseBlock();
+        std::unique_ptr<BlockStmt> body = nullptr;
+        if (requireBody)
+        {
+            Consume(TokenType::SEPARATOR, "Expected '{' before function body");
+            body = ParseBlock();
+        }
 
         auto funcDecl = std::make_unique<FuncDeclStmt>();
         funcDecl->line = startToken.line;
@@ -851,8 +943,25 @@ private:
         }
         else
         {
-            typeStr = Consume(TokenType::IDENTIFIER, "Expected type name").value;
+            if (MatchKeyword("any"))
+            {
+                typeStr = "any " + Consume(TokenType::IDENTIFIER, "Expected interface name").value;
+            }
+            else
+            {
+                typeStr = Consume(TokenType::IDENTIFIER, "Expected type name").value;
+                if (typeStr == "Array" && MatchValue(TokenType::OPERATOR, "<"))
+                {
+                    std::string elementType = ParseType();
+                    if (!MatchValue(TokenType::OPERATOR, ">"))
+                    {
+                        throw std::runtime_error("Expected '>' after Array type");
+                    }
+                    typeStr = "Array<" + elementType + ">";
+                }
+            }
         }
+
         if (!IsAtEnd() && Peek().value == "?")
         {
             Advance();
@@ -915,6 +1024,17 @@ private:
         }
         Consume(TokenType::SEPARATOR, "Expected '}' after lambda body");
 
+        if (body->statements.size() == 1)
+        {
+            if (auto* exprStmt = dynamic_cast<ExprStmt*>(body->statements.front().get()))
+            {
+                auto retStmt = std::make_unique<ReturnStmt>(std::move(exprStmt->expr));
+                retStmt->line = exprStmt->line;
+                retStmt->column = exprStmt->column;
+                body->statements.front() = std::move(retStmt);
+            }
+        }
+
         closure->body = std::move(body);
         return closure;
     }
@@ -925,7 +1045,9 @@ private:
         auto closure = std::make_unique<ClosureExpr>();
         closure->line = startToken.line;
         closure->column = startToken.column;
-        closure->returnType = "Void";
+        closure->returnType = "Any";
+
+        closure->parameters.push_back({"it", "Any"});
 
         auto body = std::make_unique<BlockStmt>();
         while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
@@ -935,6 +1057,17 @@ private:
             body->statements.push_back(ParseDeclaration());
         }
         Consume(TokenType::SEPARATOR, "Expected '}' after closure body");
+
+        if (body->statements.size() == 1)
+        {
+            if (auto* exprStmt = dynamic_cast<ExprStmt*>(body->statements.front().get()))
+            {
+                auto retStmt = std::make_unique<ReturnStmt>(std::move(exprStmt->expr));
+                retStmt->line = exprStmt->line;
+                retStmt->column = exprStmt->column;
+                body->statements.front() = std::move(retStmt);
+            }
+        }
 
         closure->body = std::move(body);
         return closure;
@@ -963,5 +1096,11 @@ private:
         }
 
         return false;
+    }
+
+    std::unique_ptr<Stmt> ParseImport()
+    {
+        Token moduleToken = Consume(TokenType::IDENTIFIER, "Expected module name after 'import'.");
+        return std::make_unique<ImportStmt>(moduleToken.value);
     }
 };

@@ -3,6 +3,8 @@
 #include <vector>
 #include <unordered_map>
 #include <stdexcept>
+#include <unordered_set>
+
 #include "../ASTBuilder/AST.h"
 #include "../Utils/TypeInfo.h"
 #include "../VirtualMachine/VirtualMachine.h"
@@ -16,8 +18,44 @@ public:
         m_functions["print"] = {
             TypeInfo::Simple(TypeKind::Void), { TypeInfo::Simple(TypeKind::Any) }
         };
-    }
 
+        m_functions["Int"] = {
+            TypeInfo::Simple(TypeKind::Int), { TypeInfo::Simple(TypeKind::Any) }
+        };
+        m_functions["Double"] = {
+            TypeInfo::Simple(TypeKind::Double), { TypeInfo::Simple(TypeKind::Any) }
+        };
+
+        m_functions["UIInitWindow"] = {
+            TypeInfo::Simple(TypeKind::Void),
+            { TypeInfo::Simple(TypeKind::Int), TypeInfo::Simple(TypeKind::Int), TypeInfo::Simple(TypeKind::String) }
+        };
+
+        m_functions["UIShouldClose"] = {
+            TypeInfo::Simple(TypeKind::Bool),
+            {}
+        };
+
+        m_functions["UIBeginFrame"] = {
+            TypeInfo::Simple(TypeKind::Void),
+            { TypeInfo::Simple(TypeKind::Int), TypeInfo::Simple(TypeKind::Int) }
+        };
+
+        m_functions["UIDrawRect"] = {
+            TypeInfo::Simple(TypeKind::Void),
+            {
+                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double)
+            }
+        };
+
+        m_functions["UIEndFrame"] = {
+            TypeInfo::Simple(TypeKind::Void),
+            {}
+        };
+    }
     FunctionPtr Compile(const std::vector<std::unique_ptr<Stmt>>& ast)
     {
         InitState("main", 0, TypeInfo::Simple(TypeKind::Void));
@@ -86,7 +124,16 @@ private:
     struct ClassInfo
     {
         std::string name;
+        bool isStruct = false;
+        std::vector<std::string> implementedInterfaces;
         std::unordered_map<std::string, FieldInfo> fields;
+        std::unordered_map<std::string, FuncInfo> methods;
+    };
+
+    struct InterfaceInfo
+    {
+        std::string name;
+        std::unordered_map<std::string, FieldInfo> properties;
         std::unordered_map<std::string, FuncInfo> methods;
     };
 
@@ -94,6 +141,9 @@ private:
     std::unordered_map<std::string, GlobalVar> m_globalVariables;
     std::unordered_map<std::string, ClassInfo> m_classes;
     std::unordered_map<std::string, FuncInfo> m_functions;
+    std::unordered_map<std::string, InterfaceInfo> m_interfaces;
+    std::unordered_set<std::string> m_importedModules;
+    std::unordered_set<std::string> m_importStack;
     
     TypeInfoPtr m_lastExprType = TypeInfo::Simple(TypeKind::Any);
 
@@ -135,13 +185,28 @@ private:
         {
             return TypeInfo::Simple(TypeKind::String);
         }
-        if (name == "Array")
+        if (name.starts_with("Array<") && name.back() == '>')
         {
-            return TypeInfo::Simple(TypeKind::Array);
+            std::string inner = name.substr(6, name.size() - 7);
+            auto type = TypeInfo::Simple(TypeKind::Array);
+            type->elementType = ResolveType(inner);
+            return type;
         }
         if (m_classes.contains(name))
         {
             return TypeInfo::Class(name);
+        }
+        std::string searchName = name;
+        if (name.starts_with("any "))
+        {
+            searchName = name.substr(4);
+        }
+
+        if (m_interfaces.contains(searchName))
+        {
+            auto interfaceType = TypeInfo::Simple(TypeKind::Interface);
+            interfaceType->name = searchName;
+            return interfaceType;
         }
         if (name.front() == '(')
         {
@@ -263,14 +328,6 @@ private:
         m_current->scopeDepth--;
         while (!m_current->locals.empty() && m_current->locals.back().depth > m_current->scopeDepth)
         {
-            if (m_current->locals.back().isCaptured)
-            {
-                Emit(OP_CLOSE_UPVALUE);
-            }
-            else
-            {
-                Emit(OP_POP);
-            }
             m_current->locals.pop_back();
         }
     }
@@ -337,7 +394,7 @@ private:
         {
             finalType = ResolveType(varDecl->typeName);
 
-            if (!finalType->IsCompatible(initType))
+            if (!AreTypesCompatible(initType, finalType))
             {
                 throw std::runtime_error("Type Error at line " + std::to_string(varDecl->line) + ": Cannot initialize variable '" + varDecl->name +
                     "' with incompatible type.");
@@ -430,7 +487,7 @@ private:
             retType = CompileExpr(returnStmt->value.get());
         }
 
-        if (!m_current->returnType->IsCompatible(retType))
+        if (!AreTypesCompatible(retType, m_current->returnType))
         {
             throw std::runtime_error("Type Error at line " + std::to_string(returnStmt->line) + ": Incompatible return value type.");
         }
@@ -515,6 +572,7 @@ private:
 
         ClassInfo classInfo;
         classInfo.name = classDecl->name;
+        classInfo.implementedInterfaces = classDecl->implementedInterfaces;
 
         for (const auto& member : classDecl->members)
         {
@@ -557,6 +615,8 @@ private:
             }
         }
         m_classes[classDecl->name] = classInfo;
+
+        ValidateInterfaces(classDecl->name, classDecl->implementedInterfaces, classInfo);
 
         Emit(OP_CLASS);
         Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
@@ -734,194 +794,111 @@ private:
 
     void Visit(StructDeclStmt* structDecl) override
     {
-        m_classes[structDecl->name] = ClassInfo{structDecl->name, {}, {}};
+        m_classes[structDecl->name] = ClassInfo{structDecl->name, true, {}, {}, {}};
 
         ClassInfo structInfo;
         structInfo.name = structDecl->name;
-
-        std::vector<TypeInfoPtr> initParamTypes;
-        std::vector<std::string> initParamNames;
+        structInfo.isStruct = true;
+        structInfo.implementedInterfaces = structDecl->implementedInterfaces;
 
         for (const auto& member : structDecl->members)
         {
-            TypeInfoPtr t = member->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(member->typeName);
-
-            if (member->computedBody)
+            if (auto* funcDeclaration = dynamic_cast<FuncDeclStmt*>(member.get()))
             {
-                structInfo.methods[member->name] = { t, {} };
+                std::vector<TypeInfoPtr> paramTypes;
+                for (const auto& param : funcDeclaration->parameters) { paramTypes.push_back(ResolveType(param.type)); }
+                structInfo.methods[funcDeclaration->name] = { ResolveType(funcDeclaration->returnType), paramTypes, funcDeclaration->accessLevel };
             }
-            else
+            else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
-                structInfo.fields[member->name] = { t, member->isWeak };
-
-                if (!member->initExpr) {
-                    initParamTypes.push_back(t);
-                    initParamNames.push_back(member->name);
-                }
+                TypeInfoPtr type = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
+                if (varDeclaration->computedBody) structInfo.methods[varDeclaration->name] = { type, {}, varDeclaration->accessLevel };
+                else structInfo.fields[varDeclaration->name] = { type, varDeclaration->isWeak, varDeclaration->accessLevel };
             }
         }
-
-        structInfo.methods["init"] = { TypeInfo::Class(structDecl->name), initParamTypes };
         m_classes[structDecl->name] = structInfo;
+        ValidateInterfaces(structDecl->name, structDecl->implementedInterfaces, structInfo);
 
         Emit(OP_STRUCT);
         Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
 
         if (isGlobalScope())
         {
-            Emit(OP_DEFINE_GLOBAL);
-            Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+            Emit(OP_DEFINE_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
             m_globalVariables[structDecl->name] = { true, TypeInfo::Class(structDecl->name) };
         }
         else
         {
             int slot = static_cast<int>(m_current->locals.size());
-            Emit(OP_SET_LOCAL);
-            Emit(static_cast<uint8_t>(slot));
-            Emit(OP_POP);
-            m_current->locals.push_back({
-                structDecl->name,
-                m_current->scopeDepth,
-                true,
-                TypeInfo::Class(structDecl->name)
-            });
+            Emit(OP_SET_LOCAL); Emit(static_cast<uint8_t>(slot)); Emit(OP_POP);
+            m_current->locals.push_back({structDecl->name, m_current->scopeDepth, true, TypeInfo::Class(structDecl->name)});
             m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
         }
 
         for (const auto& member : structDecl->members)
         {
-            if (!member->computedBody)
+            if (auto* funcDeclaration = dynamic_cast<FuncDeclStmt*>(member.get()))
             {
-                if (isGlobalScope())
-                {
-                    Emit(OP_GET_GLOBAL); Emit
-                    (MakeConstant(std::make_shared<std::string>(structDecl->name)));
-                }
-                else
-                {
-                    int slot = -1;
-                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
-                    {
-                        if (m_current->locals[i].name == structDecl->name)
-                        {
-                            slot = i; break;
-                        }
-                    }
-                    Emit(OP_GET_LOCAL);
-                    Emit(static_cast<uint8_t>(slot));
-                }
-                Emit(OP_FIELD);
-                Emit(MakeConstant(std::make_shared<std::string>(member->name)));
-                Emit(OP_POP);
-            }
-        }
-
-        InitState(
-            "init",
-            static_cast<int>(initParamNames.size()),
-            TypeInfo::Class(structDecl->name),
-            TypeInfo::Class(structDecl->name)
-        );
-        BeginScope();
-        m_current->locals[0].name = "self";
-        m_current->locals[0].type = TypeInfo::Class(structDecl->name);
-
-        for (size_t i = 0; i < initParamNames.size(); ++i)
-        {
-            m_current->locals.push_back({
-                initParamNames[i],
-                m_current->scopeDepth,
-                true,
-                initParamTypes[i]
-            });
-            m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
-
-            Emit(OP_GET_LOCAL);
-            Emit(0);
-            Emit(OP_GET_LOCAL);
-            Emit(static_cast<uint8_t>(i + 1));
-            Emit(OP_SET_PROPERTY);
-            Emit(MakeConstant(std::make_shared<std::string>(initParamNames[i])));
-            Emit(OP_POP);
-        }
-
-        Emit(OP_GET_LOCAL);
-        Emit(0);
-        Emit(OP_RETURN);
-        EndScope();
-
-        FunctionPtr compiledInit = EndState();
-        Emit(OP_CONSTANT); Emit(MakeConstant(compiledInit));
-
-        if (isGlobalScope())
-        {
-            Emit(OP_GET_GLOBAL);
-            Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
-        }
-        else
-        {
-            int slot = -1;
-            for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
-            {
-                if (m_current->locals[i].name == structDecl->name)
-                {
-                    slot = i; break;
-                }
-            }
-            Emit(OP_GET_LOCAL);
-            Emit(static_cast<uint8_t>(slot));
-        }
-        Emit(OP_METHOD);
-        Emit(MakeConstant(std::make_shared<std::string>("init")));
-
-        for (const auto& member : structDecl->members)
-        {
-            if (member->computedBody)
-            {
-                TypeInfoPtr retType = member->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(member->typeName);
-
-                InitState(member->name, 0, retType, TypeInfo::Class(structDecl->name));
+                InitState(funcDeclaration->name, static_cast<int>(funcDeclaration->parameters.size()), ResolveType(funcDeclaration->returnType), TypeInfo::Class(structDecl->name));
                 BeginScope();
-
-                m_current->locals[0].name = "self";
-                m_current->locals[0].type = TypeInfo::Class(structDecl->name);
-
-                for (const auto& s : member->computedBody->statements)
+                m_current->locals[0].name = "self"; m_current->locals[0].type = TypeInfo::Class(structDecl->name);
+                for (const auto& param : funcDeclaration->parameters)
                 {
-                    CompileStmt(s.get());
+                    m_current->locals.push_back({param.name, m_current->scopeDepth, true, ResolveType(param.type)});
+                    m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
                 }
+                for (const auto& s : funcDeclaration->body->statements) CompileStmt(s.get());
 
-                Emit(OP_CONSTANT);
-                Emit(MakeConstant(false));
-                Emit(OP_RETURN);
-                EndScope();
+                if (funcDeclaration->name == "init") { Emit(OP_GET_LOCAL); Emit(0); }
+                else { Emit(OP_CONSTANT); Emit(MakeConstant(false)); }
+                Emit(OP_RETURN); EndScope();
 
-                FunctionPtr compiledGetter = EndState();
+                FunctionPtr compiledMethod = EndState();
+                Emit(OP_CONSTANT); Emit(MakeConstant(compiledMethod));
 
-                Emit(OP_CONSTANT);
-                Emit(MakeConstant(compiledGetter));
-
-                if (isGlobalScope())
-                {
-                    Emit(OP_GET_GLOBAL);
-                    Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
-                }
+                if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
                 else
                 {
                     int slot = -1;
-                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
-                    {
-                        if (m_current->locals[i].name == structDecl->name)
-                        {
-                            slot = i; break;
-                        }
-                    }
-                    Emit(OP_GET_LOCAL);
-                    Emit(static_cast<uint8_t>(slot));
+                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i) { if (m_current->locals[i].name == structDecl->name) { slot = i; break; } }
+                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
                 }
+                Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>(funcDeclaration->name)));
+            }
+            else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
+            {
+                if (!varDeclaration->computedBody)
+                {
+                    if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+                    else
+                    {
+                        int slot = -1;
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i) { if (m_current->locals[i].name == structDecl->name) { slot = i; break; } }
+                        Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                    }
+                    Emit(OP_FIELD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name))); Emit(OP_POP);
+                }
+                else
+                {
+                    TypeInfoPtr retType = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
+                    InitState(varDeclaration->name, 0, retType, TypeInfo::Class(structDecl->name));
+                    BeginScope();
+                    m_current->locals[0].name = "self"; m_current->locals[0].type = TypeInfo::Class(structDecl->name);
+                    for (const auto& s : varDeclaration->computedBody->statements) CompileStmt(s.get());
+                    Emit(OP_CONSTANT); Emit(MakeConstant(false)); Emit(OP_RETURN); EndScope();
 
-                Emit(OP_METHOD);
-                Emit(MakeConstant(std::make_shared<std::string>(member->name)));
+                    FunctionPtr compiledGetter = EndState();
+                    Emit(OP_CONSTANT); Emit(MakeConstant(compiledGetter));
+
+                    if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+                    else
+                    {
+                        int slot = -1;
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i) { if (m_current->locals[i].name == structDecl->name) { slot = i; break; } }
+                        Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                    }
+                    Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                }
             }
         }
     }
@@ -963,7 +940,7 @@ private:
             }
 
             TypeInfoPtr valType = CompileExpr(assign->value.get());
-            if (!varType->IsCompatible(valType))
+            if (!AreTypesCompatible(valType, varType))
             {
                 throw std::runtime_error("Type Error: Incompatible assignment");
             }
@@ -1198,7 +1175,7 @@ private:
                     for (size_t i = 0; i < call->arguments.size(); ++i)
                     {
                         TypeInfoPtr argType = CompileExpr(call->arguments[i].get());
-                        if (!method.paramTypes[i]->IsCompatible(argType))
+                        if (!AreTypesCompatible(argType, method.paramTypes[i]))
                         {
                             throw std::runtime_error("Type Error: Argument type mismatch");
                         }
@@ -1210,6 +1187,15 @@ private:
                     return;
                 }
             }
+
+            Emit(OP_GET_PROPERTY);
+            Emit(MakeConstant(std::make_shared<std::string>(getCallee->propertyName)));
+            for (const auto& arg : call->arguments)
+                CompileExpr(arg.get());
+            Emit(OP_CALL);
+            Emit(static_cast<uint8_t>(call->arguments.size()));
+            m_lastExprType = TypeInfo::Simple(TypeKind::Any);
+            return;
         }
 
         CompileExpr(call->callee.get());
@@ -1228,7 +1214,7 @@ private:
                 for (size_t i = 0; i < call->arguments.size(); ++i)
                 {
                     TypeInfoPtr argType = CompileExpr(call->arguments[i].get());
-                    if (!initMethod.paramTypes[i]->IsCompatible(argType))
+                    if (!AreTypesCompatible(argType, initMethod.paramTypes[i]))
                     {
                         throw std::runtime_error("Type Error: Constructor argument type mismatch");
                     }
@@ -1256,7 +1242,7 @@ private:
             for (size_t i = 0; i < call->arguments.size(); ++i)
             {
                 TypeInfoPtr argType = CompileExpr(call->arguments[i].get());
-                if (!func.paramTypes[i]->IsCompatible(argType))
+                if (!AreTypesCompatible(argType, func.paramTypes[i]))
                 {
                     throw std::runtime_error("Type Error: Function argument type mismatch");
                 }
@@ -1314,6 +1300,29 @@ private:
     {
         TypeInfoPtr objType = CompileExpr(getExpr->object.get());
 
+        if (objType->kind == TypeKind::Array)
+        {
+            Emit(OP_GET_PROPERTY);
+            Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+
+            if (getExpr->propertyName == "count")
+            {
+                m_lastExprType = TypeInfo::Simple(TypeKind::Int);
+            }
+            else if (getExpr->propertyName == "forEach" ||
+                getExpr->propertyName == "map" ||
+                getExpr->propertyName == "filter")
+            {
+                m_lastExprType = TypeInfo::Simple(TypeKind::Func);
+            }
+            else
+            {
+               throw std::runtime_error("Compiler Error at line " + std::to_string(getExpr->line) +
+                   ": Array has no property or method '" + getExpr->propertyName + "'");
+            }
+            return;
+        }
+
         if (objType->kind == TypeKind::Class && m_classes.contains(objType->name))
         {
             const auto& klass = m_classes[objType->name];
@@ -1350,16 +1359,7 @@ private:
                 Emit(OP_GET_PROPERTY);
                 Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
 
-                if (methodInfo.paramTypes.empty())
-                {
-                    Emit(OP_CALL);
-                    Emit(0);
-                    m_lastExprType = methodInfo.returnType;
-                }
-                else
-                {
-                    m_lastExprType = TypeInfo::Simple(TypeKind::Func);
-                }
+                m_lastExprType = TypeInfo::Simple(TypeKind::Func);
                 return;
             }
             throw std::runtime_error("Compiler Error at line " + std::to_string(getExpr->line) + ": Class/Struct '" + objType->name + "' has no property or method '" + getExpr->propertyName + "'");
@@ -1386,7 +1386,7 @@ private:
             TypeInfoPtr targetType = klass.fields.at(setExpr->propertyName).type;
             bool isWeak = klass.fields.at(setExpr->propertyName).isWeak;
 
-            if (!targetType->IsCompatible(valType))
+            if (!AreTypesCompatible(valType, targetType))
             {
                 throw std::runtime_error("Type Error at line " + std::to_string(setExpr->line) + ": Cannot assign incompatible value to property '" + setExpr->propertyName + "'");
             }
@@ -1433,7 +1433,7 @@ private:
             paramTypes.push_back(ResolveType(param.type));
         }
 
-        InitState(name, static_cast<int>(closure->parameters.size()), retType);
+        InitState(name, static_cast<int>(closure->parameters.size()), retType, m_current->currentClass);
         BeginScope();
 
         for (const auto& param : closure->parameters)
@@ -1477,6 +1477,67 @@ private:
         Emit(OP_CONSTANT);
         Emit(MakeConstant(Null{}));
         m_lastExprType = TypeInfo::Simple(TypeKind::Null);
+    }
+
+    void Visit(InterfaceDeclStmt* interfaceDecl) override
+    {
+        InterfaceInfo info;
+        info.name = interfaceDecl->name;
+
+        m_interfaces[interfaceDecl->name] = info;
+
+        for (const auto& method : interfaceDecl->methods)
+        {
+            std::vector<TypeInfoPtr> paramTypes;
+            for (const auto& param : method->parameters)
+            {
+                paramTypes.push_back(ResolveType(param.type));
+            }
+            m_interfaces[interfaceDecl->name].methods[method->name] = { ResolveType(method->returnType), paramTypes, AccessLevel::Internal };
+        }
+
+        for (const auto& prop : interfaceDecl->properties)
+        {
+            m_interfaces[interfaceDecl->name].properties[prop->name] = { ResolveType(prop->typeName), false, AccessLevel::Internal };
+        }
+    }
+
+    void Visit(ImportStmt* stmt) override
+    {
+        std::string modulePath = "libs/" + stmt->moduleName + ".rocket";
+
+        if (m_importedModules.contains(modulePath))
+        {
+            return;
+        }
+
+        if (m_importStack.contains(modulePath))
+        {
+            throw std::runtime_error("Circular dependency detected: " + modulePath);
+        }
+        m_importStack.insert(modulePath);
+
+        std::ifstream file(modulePath);
+        if (!file.is_open())
+        {
+            throw std::runtime_error("Compile Error: Could not open imported module file: " + modulePath);
+        }
+
+        std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        Lexer moduleLexer(source);
+        std::vector<Token> moduleTokens = moduleLexer.Tokenize();
+        ASTBuilder moduleParser(std::move(moduleTokens));
+        auto moduleAST = moduleParser.Parse();
+
+        for (const auto& astNode : moduleAST)
+        {
+            astNode->Accept(this);
+        }
+
+        m_importStack.erase(modulePath);
+        m_importedModules.insert(modulePath);
     }
 
     int ResolveLocal(CompilerState* state, const std::string& name)
@@ -1529,5 +1590,119 @@ private:
         }
 
         return -1;
+    }
+
+    void ValidateInterfaces(const std::string& typeName, const std::vector<std::string>& implementedInterfaces, const ClassInfo& info)
+    {
+        for (const auto& interfaceName : implementedInterfaces)
+        {
+            if (!m_interfaces.contains(interfaceName))
+            {
+                throw std::runtime_error("Type Error: Interface '" + interfaceName + "' is not defined.");
+            }
+
+            const auto& interfaceInfo = m_interfaces[interfaceName];
+
+            for (const auto& [mName, mFunc] : interfaceInfo.methods)
+            {
+                if (!info.methods.contains(mName))
+                {
+                    throw std::runtime_error("Type Error: '" + typeName + "' does not implement method '" + mName + "' from interface '" + interfaceName + "'.");
+                }
+
+                const auto& classMethod = info.methods.at(mName);
+
+                if (!classMethod.returnType->IsCompatible(mFunc.returnType))
+                {
+                    throw std::runtime_error("Type Error: Return type mismatch for method '" + mName + "' in '" + typeName + "'.");
+                }
+
+                if (classMethod.paramTypes.size() != mFunc.paramTypes.size())
+                {
+                    throw std::runtime_error("Type Error: Parameter count mismatch for method '" + mName + "' in '" + typeName + "'.");
+                }
+
+                for (size_t i = 0; i < classMethod.paramTypes.size(); ++i)
+                {
+                    if (!classMethod.paramTypes[i]->IsCompatible(mFunc.paramTypes[i]))
+                    {
+                        throw std::runtime_error("Type Error: Parameter type mismatch for method '" + mName + "' in '" + typeName + "'.");
+                    }
+                }
+            }
+
+            for (const auto& [pName, pField] : interfaceInfo.properties)
+            {
+                bool hasField = info.fields.contains(pName);
+                bool hasGetter = info.methods.contains(pName) && info.methods.at(pName).paramTypes.empty();
+
+                if (!hasField && !hasGetter)
+                {
+                    throw std::runtime_error("Type Error: '" + typeName + "' does not implement property '" + pName + "' from interface '" + interfaceName + "'.");
+                }
+
+                TypeInfoPtr actualType = hasField ? info.fields.at(pName).type : info.methods.at(pName).returnType;
+                if (!actualType->IsCompatible(pField.type))
+                {
+                    throw std::runtime_error("Type Error: Type mismatch for property '" + pName + "' in '" + typeName + "'.");
+                }
+            }
+        }
+    }
+
+    bool AreTypesCompatible(const TypeInfoPtr& actual, const TypeInfoPtr& expected)
+    {
+        if (actual->kind == TypeKind::Any || expected->kind == TypeKind::Any)
+        {
+            return true;
+        }
+        if (actual->kind == TypeKind::Null)
+        {
+            return true;
+        }
+        if (expected->kind == TypeKind::Func && actual->kind == TypeKind::Func)
+        {
+            return true;
+        }
+
+        if (expected->kind == TypeKind::Interface)
+        {
+            if (actual->kind == TypeKind::Interface && actual->name == expected->name)
+            {
+                return true;
+            }
+
+            if (actual->kind == TypeKind::Class)
+            {
+                if (m_classes.contains(actual->name))
+                {
+                    const auto& classInfo = m_classes.at(actual->name);
+                    for (const auto& implemented : classInfo.implementedInterfaces)
+                    {
+                        if (implemented == expected->name)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        if (expected->kind == TypeKind::Optional && actual->kind == TypeKind::Optional)
+        {
+            return AreTypesCompatible(actual->elementType, expected->elementType);
+        }
+
+        if (expected->kind == TypeKind::Array && actual->kind == TypeKind::Array)
+        {
+            if (!expected->elementType || !actual->elementType)
+            {
+                return true;
+            }
+            return AreTypesCompatible(actual->elementType, expected->elementType);
+        }
+
+        return actual->IsCompatible(expected);
     }
 };

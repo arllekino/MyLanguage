@@ -15,6 +15,9 @@ struct BoundMethod;
 struct Null{};
 struct UpvalueObj;
 struct Closure;
+struct NativeBoundMethod;
+
+class ViewNode;
 
 using StringPtr = std::shared_ptr<const std::string>;
 using ArrayPtr = std::shared_ptr<Array>;
@@ -26,6 +29,9 @@ using BoundMethodPtr = std::shared_ptr<BoundMethod>;
 using WeakInstancePtr = std::weak_ptr<Instance>;
 using UpvaluePtr = std::shared_ptr<UpvalueObj>;
 using ClosurePtr = std::shared_ptr<Closure>;
+using NativeBoundMethodPtr = std::shared_ptr<NativeBoundMethod>;
+
+using ViewNodePtr = std::shared_ptr<ViewNode>;
 
 using Value = std::variant<
     Null,
@@ -40,7 +46,9 @@ using Value = std::variant<
     InstancePtr,
     BoundMethodPtr,
     WeakInstancePtr,
-    ClosurePtr
+    ClosurePtr,
+    ViewNodePtr,
+    NativeBoundMethodPtr
 >;
 
 struct Array
@@ -92,4 +100,10 @@ struct Closure
 {
     FunctionPtr function;
     std::vector<UpvaluePtr> upvalues;
+};
+
+struct NativeBoundMethod
+{
+    Value receiver;
+    std::function<Value(Value, const std::vector<Value>&)> func;
 };

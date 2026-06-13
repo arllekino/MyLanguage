@@ -1,0 +1,17 @@
+let numbers = [1, 2, 3, 4, 5]
+
+// 1. Использование встроенного свойства count (Без скобок!)
+print(numbers.count) // Выведет 5
+
+// 2. Использование forEach с неявным it
+numbers.forEach {
+    print(it) // Выведет 1 2 3 4 5
+}
+
+// 3. Использование filter + map
+let evens = numbers.filter { it % 2 == 0 }
+let doubled = evens.map { it * 2 }
+
+doubled.forEach {
+    print(it) // Выведет 4, 8
+}

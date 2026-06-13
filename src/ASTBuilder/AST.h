@@ -28,6 +28,8 @@ struct ClassDeclStmt;
 struct ReturnStmt;
 struct FuncDeclStmt;
 struct NullExpr;
+struct InterfaceDeclStmt;
+struct ImportStmt;
 
 class Visitor
 {
@@ -57,6 +59,8 @@ public:
     virtual void Visit(ClassDeclStmt* node) = 0;
     virtual void Visit(ReturnStmt* node) = 0;
     virtual void Visit(FuncDeclStmt* node) = 0;
+    virtual void Visit(InterfaceDeclStmt* node) = 0;
+    virtual void Visit(ImportStmt* node) = 0;
 };
 
 struct ASTNode
@@ -194,7 +198,8 @@ struct AssignExpr : Expr
 struct StructDeclStmt : Stmt
 {
     std::string name;
-    std::vector<std::unique_ptr<VarDeclStmt>> members;
+    std::vector<std::string> implementedInterfaces;
+    std::vector<std::unique_ptr<Stmt>> members;
 
     void Accept(Visitor *v) override { v->Visit(this); }
 };
@@ -202,7 +207,9 @@ struct StructDeclStmt : Stmt
 struct ClassDeclStmt : Stmt
 {
     std::string name;
+    std::vector<std::string> implementedInterfaces;
     std::vector<std::unique_ptr<Stmt>> members;
+
     void Accept(Visitor* v) override { v->Visit(this); }
 };
 
@@ -256,5 +263,24 @@ struct FuncDeclStmt : Stmt
 
 struct NullExpr : Expr
 {
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
+struct InterfaceDeclStmt : Stmt
+{
+    std::string name;
+    std::vector<std::unique_ptr<FuncDeclStmt>> methods;
+    std::vector<std::unique_ptr<VarDeclStmt>> properties;
+
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
+struct ImportStmt : Stmt
+{
+    std::string moduleName;
+
+    explicit ImportStmt(std::string name)
+        : moduleName(std::move(name)) {}
+
     void Accept(Visitor* v) override { v->Visit(this); }
 };

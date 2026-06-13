@@ -4,11 +4,13 @@
 #include <random>
 #include <unordered_map>
 #include <stdexcept>
+
 #include "Value/Value.h"
 #include "OpCode.h"
 #include "Chunk.h"
 #include "Value/ValueUtilsForLogic.h"
 #include "Value/ValueUtilsForPrint.h"
+#include "../Graphics/UIRenderer.h"
 
 struct CallFrame
 {
@@ -24,7 +26,9 @@ public:
     VirtualMachine()
     {
         m_stack.reserve(STACK_MAX);
+
         DefineNativeFunctions();
+        DefineNativeUIFunctions();
     }
 
     void DefineGlobal(const std::string& name, const Value& value)
@@ -54,13 +58,16 @@ public:
     }
 
 private:
-    static constexpr int STACK_MAX = 2048;
+    static constexpr int STACK_MAX = 2048 * 32; // 1 MB
     static constexpr int FRAMES_MAX = 64; // убрать?
 
     std::vector<Value> m_stack;
     std::vector<CallFrame> m_frames;
     std::unordered_map<std::string, Value> m_globals;
     std::vector<UpvaluePtr> m_openUpvalues;
+
+    UIRenderer m_uiRenderer;
+    bool m_uiInitialized = false;
 
     uint8_t ReadByte()
     {
@@ -184,7 +191,46 @@ private:
         return val;
     }
 
-    void Run()
+    double AsDouble(const Value& val, const std::string& errMsg)
+    {
+        if (std::holds_alternative<int64_t>(val))
+        {
+            return static_cast<double>(std::get<int64_t>(val));
+        }
+        if (std::holds_alternative<double>(val))
+        {
+            return std::get<double>(val);
+        }
+        throw std::runtime_error(errMsg);
+    }
+
+    Value CallClosure(ClosurePtr closure, const std::vector<Value>& args)
+    {
+        size_t targetDepth = m_frames.size();
+
+        CallFrame frame;
+        frame.closure = closure;
+        frame.function = closure->function;
+        frame.ip = 0;
+        frame.baseSlot = m_stack.size();
+
+        Push(closure);
+        for (const auto& arg : args)
+        {
+            Push(arg);
+        }
+
+        m_frames.push_back(frame);
+
+        int localsToAllocate = closure->function->maxLocals - args.size() - 1;
+        for(int i = 0; i < localsToAllocate; i++) Push(Null{});
+
+        Run(targetDepth);
+
+        return Pop();
+    }
+
+    void Run(size_t targetDepth = 0)
     {
         for (;;) {
             switch (const auto opcode = ReadByte())
@@ -244,11 +290,12 @@ private:
                 case OP_CALL:
                 {
                     int argCount = ReadByte();
-                    Value callee = m_stack[m_stack.size() - 1 - argCount];
+                    size_t calleeIndex = m_stack.size() - 1 - argCount;
+                    Value callee = m_stack[calleeIndex];
 
                     for (int i = 0; i < argCount; ++i)
                     {
-                        size_t idx = m_stack.size() - argCount + i;
+                        size_t idx = calleeIndex + 1 + i;
                         m_stack[idx] = CloneIfStruct(m_stack[idx]);
                     }
 
@@ -259,8 +306,12 @@ private:
                     if (std::holds_alternative<ClosurePtr>(callee))
                     {
                         ClosurePtr closure = std::get<ClosurePtr>(callee);
-                        if (argCount != closure->function->arity) {
-                            throw std::runtime_error("Expected " + std::to_string(closure->function->arity) + " args but got " + std::to_string(argCount));
+                        int expected = closure->function->arity;
+                        while (argCount < expected) { Push(Null{}); argCount++; }
+                        if (argCount > expected)
+                        {
+                            m_stack.erase(m_stack.end() - (argCount - expected), m_stack.end());
+                            argCount = expected;
                         }
                         CallFrame frame;
                         frame.closure = closure;
@@ -275,9 +326,12 @@ private:
                     else if (std::holds_alternative<FunctionPtr>(callee))
                     {
                         FunctionPtr func = std::get<FunctionPtr>(callee);
-                        if (argCount != func->arity)
-                        {
-                            throw std::runtime_error("Expected " + std::to_string(func->arity) + " args but got " + std::to_string(argCount));
+
+                        int expected = func->arity;
+                        while (argCount < expected) { Push(Null{}); argCount++; }
+                        if (argCount > expected) {
+                            m_stack.erase(m_stack.end() - (argCount - expected), m_stack.end());
+                            argCount = expected;
                         }
                         CallFrame frame;
                         frame.function = func;
@@ -294,9 +348,12 @@ private:
                     else if (std::holds_alternative<BoundMethodPtr>(callee))
                     {
                         BoundMethodPtr bound = std::get<BoundMethodPtr>(callee);
-                        if (argCount != bound->method->arity)
-                        {
-                            throw std::runtime_error("Expected " + std::to_string(bound->method->arity) + " args but got " + std::to_string(argCount));
+
+                        int expected = bound->method->arity;
+                        while (argCount < expected) { Push(Null{}); argCount++; }
+                        if (argCount > expected) {
+                            m_stack.erase(m_stack.end() - (argCount - expected), m_stack.end());
+                            argCount = expected;
                         }
 
                         m_stack[m_stack.size() - 1 - argCount] = bound->receiver;
@@ -319,8 +376,12 @@ private:
                         {
                             args.push_back(m_stack[m_stack.size() - argCount + i]);
                         }
+
+                        size_t stackSizeBeforeCall = m_stack.size() - argCount - 1;
+
                         Value result = native->func(args);
-                        m_stack.erase(m_stack.end() - argCount - 1, m_stack.end());
+
+                        m_stack.erase(m_stack.begin() + stackSizeBeforeCall, m_stack.end());
                         Push(result);
                     }
                     else if (std::holds_alternative<KlassPtr>(callee))
@@ -356,6 +417,23 @@ private:
                             }
                         }
                     }
+                    else if (std::holds_alternative<NativeBoundMethodPtr>(callee))
+                    {
+                        NativeBoundMethodPtr bound = std::get<NativeBoundMethodPtr>(callee);
+                        std::vector<Value> args;
+                        args.reserve(argCount);
+                        for (int i = 0; i < argCount; ++i)
+                        {
+                            args.push_back(m_stack[m_stack.size() - argCount + i]);
+                        }
+
+                        size_t stackSizeBeforeCall = m_stack.size() - argCount - 1;
+
+                        Value result = bound->func(bound->receiver, args);
+
+                        m_stack.erase(m_stack.begin() + stackSizeBeforeCall, m_stack.end());
+                        Push(result);
+                    }
                     else
                     {
                         throw std::runtime_error("Can only call functions and native functions.");
@@ -369,13 +447,13 @@ private:
                     CloseUpvalues(baseSlot);
                     m_frames.pop_back();
 
-                    if (m_frames.empty())
+                    m_stack.erase(m_stack.begin() + baseSlot, m_stack.end());
+                    Push(result);
+
+                    if (m_frames.size() == targetDepth)
                     {
                         return;
                     }
-
-                    m_stack.erase(m_stack.begin() + baseSlot, m_stack.end());
-                    Push(result);
                     break;
                 }
                 case OP_ADD:
@@ -586,6 +664,60 @@ private:
                     std::string propName = *std::get<StringPtr>(nameVal);
 
                     Value instanceVal = m_stack.back();
+
+                    if (std::holds_alternative<ArrayPtr>(instanceVal))
+                    {
+                        Pop();
+                        auto arr = std::get<ArrayPtr>(instanceVal);
+
+                        if (propName == "count") {
+                            Push(static_cast<int64_t>(arr->values.size()));
+                            break;
+                        }
+
+                        auto bound = std::make_shared<NativeBoundMethod>();
+                        bound->receiver = instanceVal;
+
+                        if (propName == "forEach") {
+                            bound->func = [this](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                auto closure = Expect<ClosurePtr>(args[0], "forEach expects a closure");
+                                for (const auto& val : array->values) {
+                                    Value nestedResult = CallClosure(closure, {val});
+                                }
+                                return Null{};
+                            };
+                        } else if (propName == "map") {
+                            bound->func = [this](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                auto closure = Expect<ClosurePtr>(args[0], "map expects a closure");
+                                auto newArr = std::make_shared<Array>();
+                                for (const auto& val : array->values) {
+                                    newArr->values.push_back(CallClosure(closure, {val}));
+                                }
+                                return newArr;
+                            };
+                        } else if (propName == "filter") {
+                            bound->func = [this](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                auto closure = Expect<ClosurePtr>(args[0], "filter expects a closure");
+                                auto newArr = std::make_shared<Array>();
+                                for (const auto& val : array->values) {
+                                    Value res = CallClosure(closure, {val});
+                                    if (std::holds_alternative<bool>(res) && std::get<bool>(res)) {
+                                        newArr->values.push_back(val);
+                                    }
+                                }
+                                return newArr;
+                            };
+                        } else {
+                            throw std::runtime_error("Unknown array method: " + propName);
+                        }
+
+                        Push(bound);
+                        break;
+                    }
+
                     auto instance = GetStrongInstance(instanceVal, "Only instances have properties.");
 
                     bool isField = false;
@@ -607,7 +739,7 @@ private:
                         }
                         else
                         {
-                            Push(false);
+                            throw std::runtime_error("Undefined property '" + propName + "' on instance of '" + instance->klass->name + "'.");
                         }
                     }
                     else if (instance->klass->methods.contains(propName))
@@ -778,6 +910,7 @@ private:
         DefineNativePrint();
         DefineNativeRandom();
         DefineNativeRead();
+        DefineNativeConversions();
     }
 
     void DefineNative(const std::string& name, std::function<Value(const std::vector<Value>&)> fn)
@@ -814,6 +947,92 @@ private:
             std::string input;
             std::getline(std::cin, input);
             return std::make_shared<std::string>(input);
+        });
+    }
+
+    void DefineNativeConversions()
+    {
+        DefineNative("Int", [](const std::vector<Value>& args) -> Value {
+            if (std::holds_alternative<double>(args[0]))
+            {
+                return static_cast<int64_t>(std::get<double>(args[0]));
+            }
+            if (std::holds_alternative<int64_t>(args[0]))
+            {
+                return std::get<int64_t>(args[0]);
+            }
+            throw std::runtime_error("Cannot convert to Int");
+        });
+
+        DefineNative("Double", [](const std::vector<Value>& args) -> Value {
+            if (std::holds_alternative<int64_t>(args[0]))
+            {
+                return static_cast<double>(std::get<int64_t>(args[0]));
+            }
+            if (std::holds_alternative<double>(args[0]))
+            {
+                return std::get<double>(args[0]);
+            }
+            throw std::runtime_error("Cannot convert to Double");
+        });
+    }
+
+    void DefineNativeUIFunctions()
+    {
+        DefineNative("UIInitWindow", [this](const std::vector<Value>& args) -> Value {
+            auto width = Expect<int64_t>(args[0], "width must be Int");
+            auto height = Expect<int64_t>(args[1], "height must be Int");
+            auto titlePtr = Expect<StringPtr>(args[2], "title must be String");
+
+            m_uiRenderer.Init(static_cast<int>(width), static_cast<int>(height), *titlePtr);
+            m_uiInitialized = true;
+            return Null{};
+        });
+
+        DefineNative("UIShouldClose", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized)
+            {
+                return true;
+            }
+            return glfwWindowShouldClose(m_uiRenderer.window) != 0;
+        });
+
+        DefineNative("UIBeginFrame", [this](const std::vector<Value>& args) -> Value {
+            int64_t width = Expect<int64_t>(args[0], "width must be Int");
+            int64_t height = Expect<int64_t>(args[1], "height must be Int");
+            if (m_uiInitialized) {
+                m_uiRenderer.BeginFrame(static_cast<int>(width), static_cast<int>(height));
+            }
+            return Null{};
+        });
+
+        DefineNative("UIDrawRect", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return Null{};
+
+            double x = AsDouble(args[0], "x must be Int or Double");
+            double y = AsDouble(args[1], "y must be Int or Double");
+            double w = AsDouble(args[2], "w must be Int or Double");
+            double h = AsDouble(args[3], "h must be Int or Double");
+
+            double r = AsDouble(args[4], "r must be Int or Double");
+            double g = AsDouble(args[5], "g must be Int or Double");
+            double b = AsDouble(args[6], "b must be Int or Double");
+            double a = AsDouble(args[7], "a must be Int or Double");
+
+            m_uiRenderer.DrawRect(
+                static_cast<float>(x), static_cast<float>(y),
+                static_cast<float>(w), static_cast<float>(h),
+                glm::vec4(r, g, b, a)
+            );
+            return Null{};
+        });
+
+        DefineNative("UIEndFrame", [this](const std::vector<Value>& args) -> Value
+        {
+            if (m_uiInitialized) {
+                m_uiRenderer.EndFrame();
+            }
+            return Null{};
         });
     }
 };

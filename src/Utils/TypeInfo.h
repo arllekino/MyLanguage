@@ -6,7 +6,7 @@
 enum class TypeKind
 {
     Any, Void, Null, Int, Double, Bool, String,
-    Class, Array, Optional, Func
+    Class, Array, Optional, Func, Interface,
 };
 
 struct TypeInfo;

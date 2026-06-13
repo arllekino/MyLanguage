@@ -1,0 +1,25 @@
+import UI
+
+struct MyApp: View {
+    let body: any View {
+        return VBox(20.0) {
+            return [
+                Rect(300.0, 60.0, 1.0, 0.0, 0.0),
+                HBox(10.0) {
+                    return [
+                        Rect(100.0, 100.0, 0.0, 0.8, 0.2),
+                        Rect(100.0, 100.0, 0.2, 0.4, 1.0),
+                        Rect(100.0, 100.0, 1.0, 0.8, 0.0)
+                    ]
+                },
+                Rect(300.0, 60.0, 0.0, 1.0, 0.5)
+            ]
+        }
+    }
+}
+
+let app = App()
+
+app.run("Rocket SwiftUI") {
+    return MyApp()
+}

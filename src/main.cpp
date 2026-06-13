@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     {
         FunctionPtr mainFunc = nullptr;
 
-        if (filename.ends_with(".txt"))
+        if (filename.ends_with(".rocket") || filename.ends_with(".txt"))
         {
             std::ifstream file(filename);
             std::stringstream buffer;

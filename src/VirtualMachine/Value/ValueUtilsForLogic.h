@@ -1,5 +1,6 @@
 #pragma once
 #include "./Value.h"
+#include "ValueUtilsForPrint.h"
 
 template<typename T>
 concept isBool = std::is_same_v<T, bool>;
@@ -30,6 +31,13 @@ inline Value operator+(const Value& lhs, const Value& rhs)
         }
         else
         {
+            std::cout << "\n=== FATAL OP_ADD ===" << std::endl;
+            std::cout << "Left operand: ";
+            PrintValue(l);
+            std::cout << std::endl;
+            std::cout << "Right operand: ";
+            PrintValue(r);
+            std::cout << std::endl;
             throw std::invalid_argument("Cannot add values of different types");
         }
     }, lhs, rhs);

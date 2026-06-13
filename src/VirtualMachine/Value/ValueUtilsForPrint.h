@@ -40,11 +40,29 @@ inline void PrintValue(const Value& value)
         else if constexpr (std::is_same_v<T, FunctionPtr>)
         {
             if (!v) std::cout << "null func";
-            else std::cout << "<func " << v->name;
+            else std::cout << "<func " << v->name << ">";
         }
         else if constexpr (std::is_same_v<T, Null>)
         {
             std::cout << "null";
+        }
+        else if constexpr (std::is_same_v<T, ViewNodePtr>)
+        {
+            std::cout << "<ViewNode " << v.get() << ">";
+        }
+        else if constexpr (std::is_same_v<T, InstancePtr>)
+        {
+            if (!v) std::cout << "null instance";
+            else std::cout << "<instance " << v->klass->name << ">";
+        }
+        else if constexpr (std::is_same_v<T, KlassPtr>) { std::cout << "<class>"; }
+        else if constexpr (std::is_same_v<T, ClosurePtr>) { std::cout << "<closure>"; }
+        else if constexpr (std::is_same_v<T, BoundMethodPtr> || std::is_same_v<T, NativeBoundMethodPtr>) { std::cout << "<bound method>"; }
+        else if constexpr (std::is_same_v<T, NativeFnPtr>) { std::cout << "<native fn>"; }
+        else if constexpr (std::is_same_v<T, WeakInstancePtr>) { std::cout << "<weak instance>"; }
+        else
+        {
+            std::cout << "<unknown type>";
         }
     }, value);
 }
