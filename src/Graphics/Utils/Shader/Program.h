@@ -32,10 +32,6 @@ public:
             throw std::runtime_error("Failed to link program"
                 + m_program.GetInfoLog());
         }
-        // if (!m_program.IsValid())
-        // {
-        //     throw std::runtime_error("Program is not valid");
-        // }
     }
 
     GLuint GetId() const noexcept

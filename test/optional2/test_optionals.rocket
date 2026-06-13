@@ -1,0 +1,37 @@
+// Test 1: ?? operator
+let name: String = null
+let displayName = name ?? "Anonymous"
+print(displayName)  // Anonymous
+
+let greeting: String = "Hello"
+let result = greeting ?? "Fallback"
+print(result)  // Hello
+
+// Test 2: if let
+func findUser(id: Int): String {
+    if (id == 1) {
+        return "Alice"
+    }
+    return null
+}
+
+let user = findUser(1)
+if let u = (user) {
+    print("Found user: " + u)
+} else {
+    print("User not found")
+}
+
+let missing = findUser(99)
+if let u = (missing) {
+    print("Found: " + u)
+} else {
+    print("No user with id 99")
+}
+
+// Test 3: chained ??
+let a: String = null
+let b: String = null
+let c: String = "Found C"
+let val = a ?? b ?? c
+print(val)  // Found C

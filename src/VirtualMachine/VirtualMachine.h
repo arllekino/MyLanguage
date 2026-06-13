@@ -4,6 +4,7 @@
 #include <random>
 #include <unordered_map>
 #include <stdexcept>
+#include <thread>
 
 #include "Value/Value.h"
 #include "OpCode.h"
@@ -11,6 +12,8 @@
 #include "Value/ValueUtilsForLogic.h"
 #include "Value/ValueUtilsForPrint.h"
 #include "../Graphics/UIRenderer.h"
+#include "../Network/Http.h"
+#include "../Network/Json.h"
 
 struct CallFrame
 {
@@ -23,12 +26,20 @@ struct CallFrame
 class VirtualMachine
 {
 public:
-    VirtualMachine()
+    explicit VirtualMachine(bool withUI = true)
     {
         m_stack.reserve(STACK_MAX);
 
+        m_jsonObjectKlass = std::make_shared<Klass>();
+        m_jsonObjectKlass->name = "Object";
+
+        m_resultKlass = std::make_shared<Klass>();
+        m_resultKlass->name = "Result";
+
         DefineNativeFunctions();
-        DefineNativeUIFunctions();
+        if (withUI) DefineNativeUIFunctions();
+        DefineNativeNetFunctions();
+        DefineNativeAsyncFunctions();
     }
 
     void DefineGlobal(const std::string& name, const Value& value)
@@ -57,6 +68,32 @@ public:
         Run();
     }
 
+    Value CallClosure(ClosurePtr closure, const std::vector<Value>& args)
+    {
+        size_t targetDepth = m_frames.size();
+
+        CallFrame frame;
+        frame.closure = closure;
+        frame.function = closure->function;
+        frame.ip = 0;
+        frame.baseSlot = m_stack.size();
+
+        Push(closure);
+        for (const auto& arg : args)
+        {
+            Push(arg);
+        }
+
+        m_frames.push_back(frame);
+
+        int localsToAllocate = closure->function->maxLocals - (int)args.size() - 1;
+        for(int i = 0; i < localsToAllocate; i++) Push(Null{});
+
+        Run(targetDepth);
+
+        return Pop();
+    }
+
 private:
     static constexpr int STACK_MAX = 2048 * 32; // 1 MB
     static constexpr int FRAMES_MAX = 64; // убрать?
@@ -68,6 +105,9 @@ private:
 
     UIRenderer m_uiRenderer;
     bool m_uiInitialized = false;
+
+    KlassPtr m_jsonObjectKlass;
+    KlassPtr m_resultKlass;
 
     uint8_t ReadByte()
     {
@@ -202,32 +242,6 @@ private:
             return std::get<double>(val);
         }
         throw std::runtime_error(errMsg);
-    }
-
-    Value CallClosure(ClosurePtr closure, const std::vector<Value>& args)
-    {
-        size_t targetDepth = m_frames.size();
-
-        CallFrame frame;
-        frame.closure = closure;
-        frame.function = closure->function;
-        frame.ip = 0;
-        frame.baseSlot = m_stack.size();
-
-        Push(closure);
-        for (const auto& arg : args)
-        {
-            Push(arg);
-        }
-
-        m_frames.push_back(frame);
-
-        int localsToAllocate = closure->function->maxLocals - args.size() - 1;
-        for(int i = 0; i < localsToAllocate; i++) Push(Null{});
-
-        Run(targetDepth);
-
-        return Pop();
     }
 
     void Run(size_t targetDepth = 0)
@@ -558,6 +572,34 @@ private:
                     m_frames.back().ip = ReadShort();
                     break;
                 }
+                case OP_NULL:
+                {
+                    Push(Null{});
+                    break;
+                }
+                case OP_JUMP_IF_NULL:
+                {
+                    uint16_t target = ReadShort();
+                    if (std::holds_alternative<Null>(m_stack.back()))
+                    {
+                        Pop();
+                        m_frames.back().ip = target;
+                    }
+                    break;
+                }
+                case OP_JUMP_IF_NOT_NULL:
+                {
+                    uint16_t target = ReadShort();
+                    if (!std::holds_alternative<Null>(m_stack.back()))
+                    {
+                        m_frames.back().ip = target;
+                    }
+                    else
+                    {
+                        Pop();
+                    }
+                    break;
+                }
                 case OP_BUILD_ARRAY:
                 {
                     Push(std::make_shared<Array>());
@@ -649,8 +691,8 @@ private:
                     Value fieldNameVal = ReadConstant();
                     std::string fieldName = *std::get<StringPtr>(fieldNameVal);
 
-                    Value klassVal  = Pop(); // klass is on top (pushed after value)
-                    Value fieldValue = Pop(); // value is below
+                    Value klassVal  = Pop();
+                    Value fieldValue = Pop();
                     auto klass = Expect<KlassPtr>(klassVal, "OP_STATIC_FIELD expects a class");
 
                     klass->staticFields[fieldName] = fieldValue;
@@ -785,27 +827,23 @@ private:
 
                     auto instance = GetStrongInstance(instanceVal, "Only instances have properties.");
 
+                    if (instance->fields.contains(propName))
+                    {
+                        Pop();
+                        Push(instance->fields[propName]);
+                        break;
+                    }
+
                     bool isField = false;
                     for (const auto& field : instance->klass->fields)
                     {
-                        if (field == propName)
-                        {
-                            isField = true;
-                            break;
-                        }
+                        if (field == propName) { isField = true; break; }
                     }
 
                     if (isField)
                     {
                         Pop();
-                        if (instance->fields.contains(propName))
-                        {
-                            Push(instance->fields[propName]);
-                        }
-                        else
-                        {
-                            throw std::runtime_error("Undefined property '" + propName + "' on instance of '" + instance->klass->name + "'.");
-                        }
+                        Push(Null{});
                     }
                     else if (instance->klass->methods.contains(propName))
                     {
@@ -817,7 +855,7 @@ private:
                     }
                     else
                     {
-                        throw std::runtime_error("Undefined property or method '" + propName + "' on instance.");
+                        throw std::runtime_error("Undefined property or method '" + propName + "' on instance of '" + instance->klass->name + "'.");
                     }
                     break;
                 }
@@ -962,6 +1000,24 @@ private:
                 {
                     CloseUpvalues(m_stack.size() - 1);
                     Pop();
+                    break;
+                }
+                case OP_AWAIT:
+                {
+                    Value futureVal = Pop();
+                    if (std::holds_alternative<AsyncFuturePtr>(futureVal))
+                    {
+                        auto asyncFuture = std::get<AsyncFuturePtr>(futureVal);
+                        try {
+                            Push(asyncFuture->result.get());
+                        } catch (const std::exception& e) {
+                            Push(MakeResult(false, Null{}, e.what()));
+                        }
+                    }
+                    else
+                    {
+                        Push(futureVal);
+                    }
                     break;
                 }
                 default:
@@ -1180,6 +1236,106 @@ private:
             if (!m_uiInitialized) return false;
             m_uiRenderer.ClearFocus();
             return false;
+        });
+    }
+
+    InstancePtr MakeResult(bool ok, const Value& value, const std::string& error) {
+        auto inst = std::make_shared<Instance>(m_resultKlass);
+        inst->fields["isOk"]  = ok;
+        inst->fields["value"] = value;
+        inst->fields["error"] = std::make_shared<std::string>(error);
+        return inst;
+    }
+
+    void DefineNativeNetFunctions()
+    {
+        DefineNative("ResultOk", [this](const std::vector<Value>& args) -> Value {
+            Value val = args.empty() ? Value(Null{}) : args[0];
+            return MakeResult(true, val, "");
+        });
+
+        DefineNative("ResultError", [this](const std::vector<Value>& args) -> Value {
+            std::string msg = args.empty() ? "Unknown error" :
+                *std::get<StringPtr>(args[0]);
+            return MakeResult(false, Null{}, msg);
+        });
+
+        DefineNative("JsonParse", [this](const std::vector<Value>& args) -> Value {
+            if (args.empty()) return Null{};
+            auto jsonStr = std::get<StringPtr>(args[0]);
+            try {
+                return JsonParseValue(*jsonStr, m_jsonObjectKlass);
+            } catch (const std::exception& e) {
+                return MakeResult(false, Null{}, e.what());
+            }
+        });
+
+        DefineNative("JsonStringify", [this](const std::vector<Value>& args) -> Value {
+            if (args.empty()) return std::make_shared<std::string>("null");
+            return std::make_shared<std::string>(JsonEncodeValue(args[0]));
+        });
+
+        DefineNative("HttpGet", [this](const std::vector<Value>& args) -> Value {
+            if (args.empty()) return MakeResult(false, Null{}, "Missing URL");
+            std::string url = *std::get<StringPtr>(args[0]);
+            auto r = HttpGet(url);
+            return MakeResult(r.ok, std::make_shared<std::string>(r.body), r.error);
+        });
+
+        DefineNative("HttpPost", [this](const std::vector<Value>& args) -> Value {
+            if (args.size() < 2) return MakeResult(false, Null{}, "Missing URL or body");
+            std::string url  = *std::get<StringPtr>(args[0]);
+            std::string body = *std::get<StringPtr>(args[1]);
+            std::string ct   = args.size() >= 3 ? *std::get<StringPtr>(args[2]) : "application/json";
+            auto r = HttpPost(url, body, ct);
+            return MakeResult(r.ok, std::make_shared<std::string>(r.body), r.error);
+        });
+
+        DefineNative("HttpPut", [this](const std::vector<Value>& args) -> Value {
+            if (args.size() < 2) return MakeResult(false, Null{}, "Missing URL or body");
+            std::string url  = *std::get<StringPtr>(args[0]);
+            std::string body = *std::get<StringPtr>(args[1]);
+            std::string ct   = args.size() >= 3 ? *std::get<StringPtr>(args[2]) : "application/json";
+            auto r = HttpPut(url, body, ct);
+            return MakeResult(r.ok, std::make_shared<std::string>(r.body), r.error);
+        });
+
+        DefineNative("HttpDelete", [this](const std::vector<Value>& args) -> Value {
+            if (args.empty()) return MakeResult(false, Null{}, "Missing URL");
+            std::string url = *std::get<StringPtr>(args[0]);
+            auto r = HttpDelete(url);
+            return MakeResult(r.ok, std::make_shared<std::string>(r.body), r.error);
+        });
+    }
+
+    void DefineNativeAsyncFunctions()
+    {
+        DefineNative("Async", [this](const std::vector<Value>& args) -> Value {
+            if (args.empty()) return Null{};
+            if (!std::holds_alternative<ClosurePtr>(args[0])) return Null{};
+
+            ClosurePtr closure = std::get<ClosurePtr>(args[0]);
+
+            auto globals = m_globals;
+
+            auto promise = std::make_shared<std::promise<Value>>();
+            auto future = std::make_shared<AsyncFuture>();
+            future->result = promise->get_future().share();
+
+            std::thread([closure, globals = std::move(globals), promise = std::move(promise)]() mutable {
+                try {
+                    VirtualMachine vm(false);
+                    for (auto& [name, val] : globals)
+                        vm.DefineGlobal(name, val);
+                    Value result = vm.CallClosure(closure, {});
+                    promise->set_value(result);
+                } catch (...) {
+                    try { promise->set_exception(std::current_exception()); }
+                    catch (...) {}
+                }
+            }).detach();
+
+            return future;
         });
     }
 };

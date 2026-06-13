@@ -84,6 +84,19 @@ public:
         m_functions["UISetFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
         m_functions["UIIsFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
         m_functions["UIClearFocus"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+
+        m_functions["ResultOk"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
+        m_functions["ResultError"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
+
+        m_functions["JsonParse"]     = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["JsonStringify"] = { TypeInfo::Simple(TypeKind::String), { TypeInfo::Simple(TypeKind::Any) } };
+
+        m_functions["HttpGet"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["HttpPost"]   = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["HttpPut"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["HttpDelete"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
+
+        m_functions["Async"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
     }
     FunctionPtr Compile(const std::vector<std::unique_ptr<Stmt>>& ast)
     {
@@ -157,7 +170,7 @@ private:
         std::vector<std::string> implementedInterfaces;
         std::unordered_map<std::string, FieldInfo> fields;
         std::unordered_map<std::string, FuncInfo> methods;
-        std::unordered_set<std::string> staticFieldNames; // names only; values live in the Klass at runtime
+        std::unordered_set<std::string> staticFieldNames;
     };
 
     struct InterfaceInfo
@@ -902,7 +915,8 @@ private:
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
-                if (varDeclaration->isStatic) continue; // static fields handled after all members
+                if (varDeclaration->isStatic)
+                    continue;
 
                 if (!varDeclaration->computedBody)
                 {
@@ -939,7 +953,6 @@ private:
             }
         }
 
-        // Emit static field initializations after all instance members are defined
         for (const auto& member : structDecl->members)
         {
             auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get());
@@ -1071,6 +1084,16 @@ private:
 
     void Visit(BinaryExpr* bin) override
     {
+        if (bin->op == "??")
+        {
+            CompileExpr(bin->left.get());
+            int jumpToEnd = EmitJump(OP_JUMP_IF_NOT_NULL);
+            CompileExpr(bin->right.get());
+            PatchJump(jumpToEnd);
+            m_lastExprType = TypeInfo::Simple(TypeKind::Any);
+            return;
+        }
+
         TypeInfoPtr lType = CompileExpr(bin->left.get());
         TypeInfoPtr rType = CompileExpr(bin->right.get());
 
@@ -1356,6 +1379,20 @@ private:
 
     void Visit(GetExpr* getExpr) override
     {
+        if (getExpr->isSafeChain)
+        {
+            CompileExpr(getExpr->object.get());
+            int jumpIfNull = EmitJump(OP_JUMP_IF_NULL);
+            Emit(OP_GET_PROPERTY);
+            Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+            int jumpToEnd = EmitJump(OP_JUMP);
+            PatchJump(jumpIfNull);
+            Emit(OP_NULL);
+            PatchJump(jumpToEnd);
+            m_lastExprType = TypeInfo::Simple(TypeKind::Any);
+            return;
+        }
+
         TypeInfoPtr objType = CompileExpr(getExpr->object.get());
 
         if (objType->kind == TypeKind::Array)
@@ -1422,10 +1459,9 @@ private:
             }
             if (klass.staticFieldNames.contains(getExpr->propertyName))
             {
-                // Static field: object on stack is the Klass itself; OP_GET_PROPERTY handles KlassPtr
                 Emit(OP_GET_PROPERTY);
                 Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
-                m_lastExprType = TypeInfo::Class(objType->name);
+                m_lastExprType = TypeInfo::Simple(TypeKind::Any);
                 return;
             }
             throw std::runtime_error("Compiler Error at line " + std::to_string(getExpr->line) + ": Class/Struct '" + objType->name + "' has no property or method '" + getExpr->propertyName + "'");
@@ -1545,6 +1581,13 @@ private:
         m_lastExprType = TypeInfo::Simple(TypeKind::Null);
     }
 
+    void Visit(AwaitExpr* expr) override
+    {
+        expr->expr->Accept(this);
+        Emit(OP_AWAIT);
+        m_lastExprType = TypeInfo::Simple(TypeKind::Any);
+    }
+
     void Visit(InterfaceDeclStmt* interfaceDecl) override
     {
         InterfaceInfo info;
@@ -1604,6 +1647,33 @@ private:
 
         m_importStack.erase(modulePath);
         m_importedModules.insert(modulePath);
+    }
+
+    void Visit(IfLetStmt* stmt) override
+    {
+        CompileExpr(stmt->initExpr.get());
+
+        int jumpToElse = EmitJump(OP_JUMP_IF_NULL);
+
+        int xSlot = static_cast<int>(m_current->locals.size());
+        Emit(OP_SET_LOCAL);
+        Emit(static_cast<uint8_t>(xSlot));
+        Emit(OP_POP);
+        m_current->locals.push_back({stmt->varName, m_current->scopeDepth, stmt->isConst, TypeInfo::Simple(TypeKind::Any)});
+        m_current->maxLocals = std::max(m_current->maxLocals, (int)m_current->locals.size());
+
+        CompileStmt(stmt->trueBlock.get());
+
+        if (!m_current->locals.empty() && m_current->locals.back().name == stmt->varName)
+            m_current->locals.pop_back();
+
+        int jumpToEnd = EmitJump(OP_JUMP);
+        PatchJump(jumpToElse);
+
+        if (stmt->falseBlock)
+            CompileStmt(stmt->falseBlock.get());
+
+        PatchJump(jumpToEnd);
     }
 
     int ResolveLocal(CompilerState* state, const std::string& name)

@@ -30,6 +30,8 @@ struct FuncDeclStmt;
 struct NullExpr;
 struct InterfaceDeclStmt;
 struct ImportStmt;
+struct IfLetStmt;
+struct AwaitExpr;
 
 class Visitor
 {
@@ -49,6 +51,8 @@ public:
     virtual void Visit(SetExpr* node) = 0;
     virtual void Visit(ClosureExpr* node) = 0;
     virtual void Visit(NullExpr* node) = 0;
+    virtual void Visit(IfLetStmt* node) = 0;
+    virtual void Visit(AwaitExpr* node) = 0;
 
     virtual void Visit(BlockStmt* node) = 0;
     virtual void Visit(VarDeclStmt* node) = 0;
@@ -218,9 +222,10 @@ struct GetExpr : Expr
 {
     std::unique_ptr<Expr> object;
     std::string propertyName;
+    bool isSafeChain = false;
 
-    GetExpr(std::unique_ptr<Expr> object, std::string propertyName)
-        : object(std::move(object)), propertyName(std::move(propertyName)) {}
+    GetExpr(std::unique_ptr<Expr> object, std::string propertyName, bool isSafeChain = false)
+        : object(std::move(object)), propertyName(std::move(propertyName)), isSafeChain(isSafeChain) {}
     void Accept(Visitor* v) override { v->Visit(this); }
 };
 
@@ -283,5 +288,24 @@ struct ImportStmt : Stmt
     explicit ImportStmt(std::string name)
         : moduleName(std::move(name)) {}
 
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
+struct IfLetStmt : Stmt
+{
+    bool isConst;
+    std::string varName;
+    std::unique_ptr<Expr> initExpr;
+    std::unique_ptr<BlockStmt> trueBlock;
+    std::unique_ptr<Stmt> falseBlock;
+
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
+struct AwaitExpr : Expr
+{
+    std::unique_ptr<Expr> expr;
+
+    explicit AwaitExpr(std::unique_ptr<Expr> expr) : expr(std::move(expr)) {}
     void Accept(Visitor* v) override { v->Visit(this); }
 };

@@ -12,7 +12,19 @@ inline Value operator+(const Value& lhs, const Value& rhs)
         using L = std::decay_t<decltype(l)>;
         using R = std::decay_t<decltype(r)>;
 
-        if constexpr (isBool<L> || isBool<R>)
+        if constexpr (std::is_same_v<L, StringPtr>)
+        {
+            std::string left = l ? *l : "null";
+            std::string right = ValueToString(rhs);
+            return std::make_shared<std::string>(left + right);
+        }
+        else if constexpr (std::is_same_v<R, StringPtr>)
+        {
+            std::string left = ValueToString(lhs);
+            std::string right = r ? *r : "null";
+            return std::make_shared<std::string>(left + right);
+        }
+        else if constexpr (isBool<L> || isBool<R>)
         {
             throw std::invalid_argument("Operations with bool are not supported");
         }
@@ -21,24 +33,9 @@ inline Value operator+(const Value& lhs, const Value& rhs)
             using ResultType = std::common_type_t<L, R>;
             return static_cast<ResultType>(l + r);
         }
-        else if constexpr (std::is_same_v<L, StringPtr> && std::is_same_v<R, StringPtr>)
-        {
-            if (l && r)
-            {
-                return std::make_shared<std::string>(*l + *r);
-            }
-            throw std::invalid_argument("Cannot concatenate null strings");
-        }
         else
         {
-            std::cout << "\n=== FATAL OP_ADD ===" << std::endl;
-            std::cout << "Left operand: ";
-            PrintValue(l);
-            std::cout << std::endl;
-            std::cout << "Right operand: ";
-            PrintValue(r);
-            std::cout << std::endl;
-            throw std::invalid_argument("Cannot add values of different types");
+            throw std::invalid_argument("Cannot add values of these types");
         }
     }, lhs, rhs);
 }

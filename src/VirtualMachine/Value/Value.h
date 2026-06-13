@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <future>
 
 struct Chunk;
 struct Array;
@@ -16,6 +17,7 @@ struct Null{};
 struct UpvalueObj;
 struct Closure;
 struct NativeBoundMethod;
+struct AsyncFuture;
 
 class ViewNode;
 
@@ -30,6 +32,7 @@ using WeakInstancePtr = std::weak_ptr<Instance>;
 using UpvaluePtr = std::shared_ptr<UpvalueObj>;
 using ClosurePtr = std::shared_ptr<Closure>;
 using NativeBoundMethodPtr = std::shared_ptr<NativeBoundMethod>;
+using AsyncFuturePtr = std::shared_ptr<AsyncFuture>;
 
 using ViewNodePtr = std::shared_ptr<ViewNode>;
 
@@ -48,7 +51,8 @@ using Value = std::variant<
     WeakInstancePtr,
     ClosurePtr,
     ViewNodePtr,
-    NativeBoundMethodPtr
+    NativeBoundMethodPtr,
+    AsyncFuturePtr
 >;
 
 struct Array
@@ -107,4 +111,9 @@ struct NativeBoundMethod
 {
     Value receiver;
     std::function<Value(Value, const std::vector<Value>&)> func;
+};
+
+struct AsyncFuture
+{
+    std::shared_future<Value> result;
 };

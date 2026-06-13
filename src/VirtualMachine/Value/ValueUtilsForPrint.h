@@ -1,7 +1,22 @@
 #pragma once
 #include <iostream>
+#include <sstream>
 
 #include "./Value.h"
+
+inline std::string ValueToString(const Value& value)
+{
+    return std::visit([] (auto&& v) -> std::string {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, int64_t>)   return std::to_string(v);
+        if constexpr (std::is_same_v<T, double>)     { std::ostringstream s; s << v; return s.str(); }
+        if constexpr (std::is_same_v<T, bool>)       return v ? "true" : "false";
+        if constexpr (std::is_same_v<T, StringPtr>)  return v ? *v : "null";
+        if constexpr (std::is_same_v<T, Null>)            return "null";
+        if constexpr (std::is_same_v<T, AsyncFuturePtr>)  return "<async>";
+        return "<value>";
+    }, value);
+}
 
 inline void PrintValue(const Value& value)
 {
@@ -60,6 +75,7 @@ inline void PrintValue(const Value& value)
         else if constexpr (std::is_same_v<T, BoundMethodPtr> || std::is_same_v<T, NativeBoundMethodPtr>) { std::cout << "<bound method>"; }
         else if constexpr (std::is_same_v<T, NativeFnPtr>) { std::cout << "<native fn>"; }
         else if constexpr (std::is_same_v<T, WeakInstancePtr>) { std::cout << "<weak instance>"; }
+        else if constexpr (std::is_same_v<T, AsyncFuturePtr>) { std::cout << "<async>"; }
         else
         {
             std::cout << "<unknown type>";

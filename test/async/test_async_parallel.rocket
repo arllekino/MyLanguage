@@ -1,0 +1,20 @@
+import Net
+
+// Запускаем 3 HTTP-запроса параллельно
+let f1 = Async { return Http.get("https://jsonplaceholder.typicode.com/todos/1") }
+let f2 = Async { return Http.get("https://jsonplaceholder.typicode.com/todos/2") }
+let f3 = Async { return Http.get("https://jsonplaceholder.typicode.com/todos/3") }
+
+print("all 3 requests launched in parallel...")
+
+let r1 = await f1
+let r2 = await f2
+let r3 = await f3
+
+let t1 = Json.parse(r1.value)
+let t2 = Json.parse(r2.value)
+let t3 = Json.parse(r3.value)
+
+print("1: " + t1.title)
+print("2: " + t2.title)
+print("3: " + t3.title)

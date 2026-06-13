@@ -441,9 +441,51 @@ private:
         return stmt;
     }
 
+    std::unique_ptr<Stmt> ParseIfLetStatement(bool isConst)
+    {
+        Token startToken = Previous();
+        std::string varName = Consume(TokenType::IDENTIFIER, "Expected variable name after 'if let'").value;
+        if (!MatchValue(TokenType::OPERATOR, "="))
+            throw std::runtime_error("Expected '=' after variable name in 'if let'");
+        if (!MatchValue(TokenType::SEPARATOR, "("))
+            throw std::runtime_error("Expected '(' after '='");
+        auto initExpr = ParseExpression();
+        if (!MatchValue(TokenType::SEPARATOR, ")"))
+            throw std::runtime_error("Expected ')' after expression in 'if let'");
+        if (!MatchValue(TokenType::SEPARATOR, "{"))
+            throw std::runtime_error("Expected '{' after 'if let ...'");
+        auto trueBlock = ParseBlock();
+
+        auto stmt = std::make_unique<IfLetStmt>();
+        stmt->line = startToken.line;
+        stmt->column = startToken.column;
+        stmt->isConst = isConst;
+        stmt->varName = varName;
+        stmt->initExpr = std::move(initExpr);
+        stmt->trueBlock = std::move(trueBlock);
+
+        if (MatchKeyword("else"))
+        {
+            if (MatchKeyword("if"))
+            {
+                stmt->falseBlock = ParseIfStatement();
+            }
+            else
+            {
+                if (!MatchValue(TokenType::SEPARATOR, "{")) throw std::runtime_error("Expected '{' before else block");
+                stmt->falseBlock = ParseBlock();
+            }
+        }
+        return stmt;
+    }
+
     std::unique_ptr<Stmt> ParseIfStatement()
     {
         Token startToken = Previous();
+
+        if (MatchKeyword("let")) return ParseIfLetStatement(false);
+        if (MatchKeyword("const")) return ParseIfLetStatement(true);
+
         if (!MatchValue(TokenType::SEPARATOR, "("))
         {
             throw std::runtime_error("Expected '(' after 'if'");
@@ -628,7 +670,7 @@ private:
 
     std::unique_ptr<Expr> ParseAssignment()
     {
-        auto expr = ParseLogicOr();
+        auto expr = ParseNilCoalescing();
 
         if (MatchValue(TokenType::OPERATOR, "="))
         {
@@ -658,6 +700,22 @@ private:
             throw std::runtime_error("Parse Error: Invalid assignment target at line " + std::to_string(Previous().line));
         }
 
+        return expr;
+    }
+
+    std::unique_ptr<Expr> ParseNilCoalescing()
+    {
+        auto expr = ParseLogicOr();
+
+        while (MatchValue(TokenType::OPERATOR, "??"))
+        {
+            Token opToken = Previous();
+            auto right = ParseLogicOr();
+            auto newExpr = std::make_unique<BinaryExpr>("??", std::move(expr), std::move(right));
+            newExpr->line = opToken.line;
+            newExpr->column = opToken.column;
+            expr = std::move(newExpr);
+        }
         return expr;
     }
 
@@ -821,7 +879,18 @@ private:
             {
                 Token opToken = Previous();
                 std::string propName = Consume(TokenType::IDENTIFIER, "Expected property name after '.'").value;
-                auto getExpr = std::make_unique<GetExpr>(std::move(expr), propName);
+                auto getExpr = std::make_unique<GetExpr>(std::move(expr), propName, false);
+                getExpr->line = opToken.line; getExpr->column = opToken.column;
+                expr = std::move(getExpr);
+            }
+            else if (Check(TokenType::OPTIONAL) &&
+                     m_current + 1 < (int)m_tokens.size() && m_tokens[m_current + 1].type == TokenType::SEPARATOR &&
+                     m_tokens[m_current + 1].value == ".")
+            {
+                Token opToken = Advance();
+                Advance();
+                std::string propName = Consume(TokenType::IDENTIFIER, "Expected property name after '?.'").value;
+                auto getExpr = std::make_unique<GetExpr>(std::move(expr), propName, true);
                 getExpr->line = opToken.line; getExpr->column = opToken.column;
                 expr = std::move(getExpr);
             }
@@ -865,6 +934,14 @@ private:
         {
             Advance();
             expr = std::make_unique<IdentifierExpr>("self");
+        }
+        else if (MatchKeyword("await"))
+        {
+            auto operand = ParseCall();
+            auto awaitExpr = std::make_unique<AwaitExpr>(std::move(operand));
+            awaitExpr->line = startToken.line;
+            awaitExpr->column = startToken.column;
+            return awaitExpr;
         }
         else if (Match(TokenType::IDENTIFIER))
         {

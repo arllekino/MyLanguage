@@ -1,0 +1,28 @@
+class User {
+    let name: String
+
+    init(name: String) {
+        self.name = name
+    }
+}
+
+func getUser(logged: Bool): User {
+    if (logged) {
+        return User("Alice")
+    }
+    return null
+}
+
+// Safe chain: user?.name returns null if user is null
+let user1 = getUser(true)
+let n1 = user1?.name ?? "Guest"
+print(n1)  // Alice
+
+let user2 = getUser(false)
+let n2 = user2?.name ?? "Guest"
+print(n2)  // Guest
+
+// if let with safe chain result
+if let name = (user1?.name) {
+    print("Name is: " + name)
+}

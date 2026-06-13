@@ -1,0 +1,36 @@
+// Block 3: async/await test
+import Net
+
+// 1. Простой Async { } — блок на фоновом потоке
+let future = Async {
+    print("async block started")
+    let x = 10
+    let y = 20
+    return x + y
+}
+
+print("main thread continues while async runs...")
+
+let result = await future
+print("async result: " + result)
+
+// 2. Async с HTTP-запросом (background fetch)
+let httpFuture = Async {
+    return Http.get("https://jsonplaceholder.typicode.com/todos/1")
+}
+
+print("waiting for HTTP...")
+let httpResult = await httpFuture
+
+if (httpResult.isOk) {
+    let parsed = Json.parse(httpResult.value)
+    print("title: " + parsed.title)
+} else {
+    print("error: " + httpResult.error)
+}
+
+// 3. await inline
+let sum = await Async {
+    return 100 + 200
+}
+print("inline await: " + sum)

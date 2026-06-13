@@ -49,17 +49,14 @@ public:
     GLuint vao = 0, vbo = 0;
     std::vector<UIVertex> vertices;
 
-    // Mouse state
     float mouseX = 0, mouseY = 0;
     bool  mouseDown = false;
     bool  mouseDownPrev = false;
 
-    // Keyboard state — characters typed this frame
     std::string pendingText;
     bool backspacePressed = false;
     bool enterPressed = false;
 
-    // Focus state
     std::string m_focusedId;
 
     void SetFocused(const std::string& id) { m_focusedId = id; }
@@ -88,7 +85,6 @@ public:
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        // Register input callbacks
         glfwSetWindowUserPointer(window, this);
 
         glfwSetCharCallback(window, [](GLFWwindow* w, unsigned int codepoint) {
@@ -124,7 +120,6 @@ public:
         vertices.clear();
         m_textRenderer.BeginFrame();
 
-        // Poll mouse
         mouseDownPrev = mouseDown;
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
@@ -132,7 +127,6 @@ public:
         mouseY    = static_cast<float>(my);
         mouseDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
 
-        // Reset per-frame keyboard flags
         pendingText      = "";
         backspacePressed = false;
         enterPressed     = false;
@@ -176,7 +170,6 @@ public:
 
     void EndFrame()
     {
-        // 1. Flush colored rects
         if (!vertices.empty()) {
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
             glBufferSubData(GL_ARRAY_BUFFER, 0,
@@ -185,7 +178,6 @@ public:
             glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
         }
 
-        // 2. Flush text quads
         m_textRenderer.EndFrame(m_projection);
 
         glfwSwapBuffers(window);

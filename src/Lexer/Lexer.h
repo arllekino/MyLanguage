@@ -96,7 +96,6 @@ private:
         {"private", TokenType::KEYWORD}, {"public", TokenType::KEYWORD},
         {"internal", TokenType::KEYWORD}, {"domain", TokenType::KEYWORD},
         {"struct", TokenType::KEYWORD}, {"interface", TokenType::KEYWORD},
-        {"get", TokenType::KEYWORD}, {"set", TokenType::KEYWORD},
         {"override", TokenType::KEYWORD},
         {"enum", TokenType::KEYWORD}, {"case", TokenType::KEYWORD},
         {"default", TokenType::KEYWORD},

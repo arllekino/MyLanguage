@@ -40,6 +40,7 @@ FetchContent_MakeAvailable(glfw)
 find_package(OpenGL REQUIRED)
 find_package(glm REQUIRED)
 find_package(GLEW REQUIRED)
+find_package(CURL REQUIRED)
 
 add_executable(MyLanguage
         src/main.cpp
@@ -67,6 +68,8 @@ add_executable(MyLanguage
         src/Graphics/View/ViewNode.h
         src/Graphics/View/VBoxNode.h
         src/Graphics/View/Shapes/Rect.h
+        src/Network/Http.h
+        src/Network/Json.h
 )
 
 target_link_libraries(MyLanguage
@@ -76,7 +79,10 @@ target_link_libraries(MyLanguage
         glm::glm
         GLEW::GLEW
         glad
+        CURL::libcurl
 )
+
+target_include_directories(MyLanguage PRIVATE vendor)
 
 add_executable(MyLanguageTest test/test.cpp)
 

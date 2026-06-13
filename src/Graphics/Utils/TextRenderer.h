@@ -38,7 +38,6 @@ public:
         }
         if (fontData.empty()) return false;
 
-        // TTC collections need the per-font offset; TTF files return 0
         int fontOffset = stbtt_GetFontOffsetForIndex(fontData.data(), 0);
         if (fontOffset < 0) return false;
 
@@ -126,7 +125,6 @@ private:
 
     void BuildQuads(float startX, float startY, const std::string& text, float fontSize) {
         float scale = fontSize / BAKE_SIZE;
-        // cursor in baked-size space; baseline sits below top by BAKE_SIZE
         float cx = startX / scale;
         float cy = startY / scale + BAKE_SIZE;
 
