@@ -15,7 +15,7 @@ class FormViewModel {
 struct FormView: View {
     let vm: FormViewModel
 
-    let body: any View {
+    let view: any View {
         return VBox(16.0) {
             return [
                 Text("Type something:", 20.0, Color.white),

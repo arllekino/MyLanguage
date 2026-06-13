@@ -15,18 +15,9 @@ struct MyApp: View {
         return VBox(20.0) {
             return [
                 Text(self.vm.state, 24.0, Color.white),
-                Rect(300.0, 60.0, Color.red),
-                Button("Set State", Color.red) {
+                Button("Clear", Color.red) {
                     self.vm.setState()
-                },
-                HBox(10.0) {
-                    return [
-                        Rect(100.0, 100.0, Color.green),
-                        Rect(100.0, 100.0, Color.blue),
-                        Rect(100.0, 100.0, Color.orange)
-                    ]
-                },
-                Rect(300.0, 60.0, Color.teal)
+                }
             ]
         }
     }

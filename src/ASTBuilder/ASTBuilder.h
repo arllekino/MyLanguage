@@ -115,6 +115,12 @@ private:
         {
             return ParseStructDeclaration();
         }
+        if (MatchKeyword("async"))
+        {
+            if (!MatchKeyword("func"))
+                throw std::runtime_error("Expected 'func' after 'async'");
+            return ParseFuncDeclaration(false, true, true);
+        }
         if (MatchKeyword("func"))
         {
             return ParseFuncDeclaration(false);
@@ -219,11 +225,29 @@ private:
                 dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
                 classDecl->members.push_back(std::move(funcNode));
             }
+            else if (MatchKeyword("async"))
+            {
+                if (!MatchKeyword("func"))
+                    throw std::runtime_error("Expected 'func' after 'async'");
+                auto funcNode = ParseFuncDeclaration(false, true, true);
+                dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
+                classDecl->members.push_back(std::move(funcNode));
+            }
             else if (MatchKeyword("func"))
             {
                 auto funcNode = ParseFuncDeclaration(false);
                 dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
                 classDecl->members.push_back(std::move(funcNode));
+            }
+            else if (MatchKeyword("trackable") || MatchKeyword("tracked"))
+            {
+                bool isTrackable = Previous().value == "trackable";
+                MatchKeyword("let"); // consume the 'let' after trackable/tracked
+                auto varNode = ParseVarDeclaration(false);
+                auto* varDecl = dynamic_cast<VarDeclStmt*>(varNode.get());
+                varDecl->accessLevel = accessLevel;
+                varDecl->isTrackable = isTrackable;
+                classDecl->members.push_back(std::move(varNode));
             }
             else if (MatchKeyword("let") || MatchKeyword("const"))
             {
@@ -286,6 +310,16 @@ private:
                 v->isStatic = true;
                 structDecl->members.push_back(std::move(varNode));
             }
+            else if (MatchKeyword("trackable") || MatchKeyword("tracked"))
+            {
+                bool isTrackable = Previous().value == "trackable";
+                MatchKeyword("let");
+                auto varNode = ParseVarDeclaration(false);
+                auto* varDecl = dynamic_cast<VarDeclStmt*>(varNode.get());
+                varDecl->accessLevel = accessLevel;
+                varDecl->isTrackable = isTrackable;
+                structDecl->members.push_back(std::move(varNode));
+            }
             else if (MatchKeyword("let") || MatchKeyword("const"))
             {
                 auto varNode = ParseVarDeclaration(Previous().value == "const");
@@ -295,6 +329,14 @@ private:
             else if (MatchKeyword("init"))
             {
                 auto funcNode = ParseFuncDeclaration(true);
+                dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
+                structDecl->members.push_back(std::move(funcNode));
+            }
+            else if (MatchKeyword("async"))
+            {
+                if (!MatchKeyword("func"))
+                    throw std::runtime_error("Expected 'func' after 'async'");
+                auto funcNode = ParseFuncDeclaration(false, true, true);
                 dynamic_cast<FuncDeclStmt*>(funcNode.get())->accessLevel = accessLevel;
                 structDecl->members.push_back(std::move(funcNode));
             }
@@ -314,7 +356,7 @@ private:
         return structDecl;
     }
 
-    std::unique_ptr<Stmt> ParseFuncDeclaration(const bool isInit, bool requireBody = true)
+    std::unique_ptr<Stmt> ParseFuncDeclaration(const bool isInit, bool requireBody = true, bool isAsync = false)
     {
         Token startToken = Previous();
         std::string funcName;
@@ -366,6 +408,7 @@ private:
         funcDecl->parameters = std::move(parameters);
         funcDecl->returnType = returnType;
         funcDecl->body = std::move(body);
+        funcDecl->isAsync = isAsync;
 
         return funcDecl;
     }

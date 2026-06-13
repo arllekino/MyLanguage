@@ -84,6 +84,7 @@ public:
         m_functions["UISetFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
         m_functions["UIIsFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
         m_functions["UIClearFocus"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+        m_functions["UIGetVersion"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
 
         m_functions["ResultOk"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
         m_functions["ResultError"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
@@ -773,7 +774,7 @@ private:
                         Emit(static_cast<uint8_t>(slot));
                     }
 
-                    Emit(OP_FIELD);
+                    Emit(varDeclaration->isTrackable ? OP_FIELD_TRACKABLE : OP_FIELD);
                     Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
                     Emit(OP_POP);
                 }
@@ -831,6 +832,52 @@ private:
                     Emit(OP_METHOD);
                     Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
                 }
+            }
+        }
+
+        // Auto-generate a default init() if none exists and some fields have default values
+        bool classHasExplicitInit = false;
+        for (const auto& member : classDecl->members)
+            if (auto* f = dynamic_cast<FuncDeclStmt*>(member.get())) if (f->name == "init") { classHasExplicitInit = true; break; }
+
+        if (!classHasExplicitInit)
+        {
+            std::vector<VarDeclStmt*> defaultFields;
+            for (const auto& member : classDecl->members)
+            {
+                auto* v = dynamic_cast<VarDeclStmt*>(member.get());
+                if (v && !v->isStatic && !v->computedBody && v->initExpr) defaultFields.push_back(v);
+            }
+            if (!defaultFields.empty())
+            {
+                InitState("init", 0, TypeInfo::Simple(TypeKind::Any), TypeInfo::Class(classDecl->name));
+                BeginScope();
+                m_current->locals[0].name = "self";
+                m_current->locals[0].type = TypeInfo::Class(classDecl->name);
+
+                for (auto* v : defaultFields)
+                {
+                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(0));
+                    CompileExpr(v->initExpr.get());
+                    Emit(OP_SET_PROPERTY); Emit(MakeConstant(std::make_shared<std::string>(v->name)));
+                    Emit(OP_POP);
+                }
+
+                Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(0));
+                Emit(OP_RETURN); EndScope();
+
+                FunctionPtr initFunc = EndState();
+                Emit(OP_CONSTANT); Emit(MakeConstant(initFunc));
+
+                if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(classDecl->name))); }
+                else
+                {
+                    int slot = -1;
+                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        if (m_current->locals[i].name == classDecl->name) { slot = i; break; }
+                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                }
+                Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>("init")));
             }
         }
     }
@@ -927,7 +974,8 @@ private:
                         for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i) { if (m_current->locals[i].name == structDecl->name) { slot = i; break; } }
                         Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
                     }
-                    Emit(OP_FIELD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name))); Emit(OP_POP);
+                    Emit(varDeclaration->isTrackable ? OP_FIELD_TRACKABLE : OP_FIELD);
+                    Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name))); Emit(OP_POP);
                 }
                 else
                 {
@@ -971,6 +1019,52 @@ private:
                 Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
             }
             Emit(OP_STATIC_FIELD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+        }
+
+        // Auto-generate a default init() if none exists and some fields have default values
+        bool hasExplicitInit = false;
+        for (const auto& member : structDecl->members)
+            if (auto* f = dynamic_cast<FuncDeclStmt*>(member.get())) if (f->name == "init") { hasExplicitInit = true; break; }
+
+        if (!hasExplicitInit)
+        {
+            std::vector<VarDeclStmt*> defaultFields;
+            for (const auto& member : structDecl->members)
+            {
+                auto* v = dynamic_cast<VarDeclStmt*>(member.get());
+                if (v && !v->isStatic && !v->computedBody && v->initExpr) defaultFields.push_back(v);
+            }
+            if (!defaultFields.empty())
+            {
+                InitState("init", 0, TypeInfo::Simple(TypeKind::Any), TypeInfo::Class(structDecl->name));
+                BeginScope();
+                m_current->locals[0].name = "self";
+                m_current->locals[0].type = TypeInfo::Class(structDecl->name);
+
+                for (auto* v : defaultFields)
+                {
+                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(0));
+                    CompileExpr(v->initExpr.get());
+                    Emit(OP_SET_PROPERTY); Emit(MakeConstant(std::make_shared<std::string>(v->name)));
+                    Emit(OP_POP);
+                }
+
+                Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(0));
+                Emit(OP_RETURN); EndScope();
+
+                FunctionPtr initFunc = EndState();
+                Emit(OP_CONSTANT); Emit(MakeConstant(initFunc));
+
+                if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+                else
+                {
+                    int slot = -1;
+                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        if (m_current->locals[i].name == structDecl->name) { slot = i; break; }
+                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                }
+                Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>("init")));
+            }
         }
     }
 

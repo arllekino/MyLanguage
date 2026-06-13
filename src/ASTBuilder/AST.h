@@ -119,6 +119,7 @@ struct VarDeclStmt : Stmt
     bool isConst;
     bool isWeak = false;
     bool isStatic = false;
+    bool isTrackable = false;
     std::string name;
     std::string typeName;
     std::unique_ptr<Expr> initExpr;
@@ -260,6 +261,7 @@ struct ReturnStmt : Stmt
 struct FuncDeclStmt : Stmt
 {
     AccessLevel accessLevel = AccessLevel::Internal;
+    bool isAsync = false;
     std::string name;
     std::vector<Parameter> parameters;
     std::string returnType;

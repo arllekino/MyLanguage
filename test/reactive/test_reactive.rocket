@@ -1,0 +1,44 @@
+import Net
+
+// AppState с trackable полями
+class AppState {
+    trackable let count: Int = 0
+    trackable let message: String = ""
+    let label: String = "non-trackable"
+}
+
+let state = AppState()
+
+// 1. Проверка что trackable поля меняются
+state.count = 1
+state.count = 2
+state.count = 3
+
+print("count: " + state.count)
+print("version after 3 sets: " + UIGetVersion(state))
+
+// 2. Async меняет trackable state, main читает
+let f = Async {
+    state.count = 100
+    state.message = "loaded from async"
+}
+
+let result = await f
+print("after await — count: " + state.count)
+print("after await — message: " + state.message)
+print("version after async: " + UIGetVersion(state))
+
+// 3. Параллельные async обновления
+let v0 = UIGetVersion(state)
+
+let f1 = Async { state.count = state.count + 1 }
+let f2 = Async { state.count = state.count + 1 }
+let f3 = Async { state.count = state.count + 1 }
+
+await f1
+await f2
+await f3
+
+let vFinal = UIGetVersion(state)
+print("version grew by: " + (vFinal - v0))
+print("final count: " + state.count)

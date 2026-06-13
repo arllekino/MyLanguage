@@ -1,0 +1,109 @@
+import UI
+
+class DemoViewModel {
+    trackable let inputText: String = ""
+    trackable let statusText: String = "not pressed"
+
+    func onInput(text: String) {
+        self.inputText = text
+    }
+
+    func onPress() {
+        self.statusText = "button pressed!"
+    }
+
+    func onReset() {
+        self.inputText = ""
+        self.statusText = "not pressed"
+    }
+}
+
+struct PrimitivesDemo: View {
+    tracked let vm: DemoViewModel = DemoViewModel()
+
+    let view: any View {
+        return VBox(18.0) {
+            return [
+                Text("TEXT primitive", 22.0, Color.white),
+                HBox(20.0) {
+                    return [
+                        Text("white/22", 22.0, Color.white),
+                        Text("orange/18", 18.0, Color.orange),
+                        Text("teal/16", 16.0, Color.teal),
+                        Text("purple/14", 14.0, Color.purple),
+                        Text("gray/12", 12.0, Color.gray)
+                    ]
+                },
+
+                Text("RECT + COLOR palette", 22.0, Color.white),
+                HBox(8.0) {
+                    return [
+                        Rect(55.0, 36.0, Color.red),
+                        Rect(55.0, 36.0, Color.green),
+                        Rect(55.0, 36.0, Color.blue),
+                        Rect(55.0, 36.0, Color.orange),
+                        Rect(55.0, 36.0, Color.purple),
+                        Rect(55.0, 36.0, Color.teal),
+                        Rect(55.0, 36.0, Color.gray),
+                        Rect(55.0, 36.0, Color.dark),
+                        Rect(55.0, 36.0, Color.white)
+                    ]
+                },
+
+                Text("BUTTON primitive", 22.0, Color.white),
+                HBox(12.0) {
+                    return [
+                        Button("Press me", Color.blue) {
+                            self.vm.onPress()
+                        },
+                        Button("Reset", Color.red) {
+                            self.vm.onReset()
+                        },
+                        Button("Secondary", Color.teal) {
+                            self.vm.onPress()
+                        }
+                    ]
+                },
+                Text(self.vm.statusText, 16.0, Color.orange),
+
+                Text("TEXTFIELD primitive", 22.0, Color.white),
+                TextField("demo_field", self.vm.inputText, 320.0) {
+                    self.vm.onInput(it)
+                },
+                Text(self.vm.inputText, 16.0, Color.green),
+
+                Text("VBOX + HBOX layout", 22.0, Color.white),
+                HBox(10.0) {
+                    return [
+                        VBox(6.0) {
+                            return [
+                                Rect(70.0, 28.0, Color.red),
+                                Rect(70.0, 28.0, Color.green),
+                                Rect(70.0, 28.0, Color.blue)
+                            ]
+                        },
+                        VBox(6.0) {
+                            return [
+                                Rect(70.0, 28.0, Color.orange),
+                                Rect(70.0, 28.0, Color.purple),
+                                Rect(70.0, 28.0, Color.teal)
+                            ]
+                        },
+                        VBox(6.0) {
+                            return [
+                                Rect(70.0, 90.0, Color.gray),
+                                Rect(70.0, 8.0, Color.white)
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
+
+let app = App()
+
+app.run("Rocket -- All UI Primitives") {
+    return PrimitivesDemo()
+}

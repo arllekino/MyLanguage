@@ -5,6 +5,9 @@
 #include <memory>
 #include <functional>
 #include <future>
+#include <atomic>
+#include <shared_mutex>
+#include <unordered_set>
 
 struct Chunk;
 struct Array;
@@ -77,7 +80,9 @@ struct Klass
 {
     std::string name;
     bool isStruct = false;
+    bool hasTrackableFields = false;
     std::vector<std::string> fields;
+    std::unordered_set<std::string> trackableFields;
     std::unordered_map<std::string, FunctionPtr> methods;
     std::unordered_map<std::string, Value> staticFields;
 };
@@ -86,6 +91,8 @@ struct Instance
 {
     KlassPtr klass;
     std::unordered_map<std::string, Value> fields;
+    std::atomic<int64_t> version{0};
+    std::shared_ptr<std::shared_mutex> trackMutex;
 };
 
 struct BoundMethod

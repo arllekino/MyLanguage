@@ -403,6 +403,8 @@ private:
                         KlassPtr klass = std::get<KlassPtr>(callee);
                         auto instance = std::make_shared<Instance>();
                         instance->klass = klass;
+                        if (klass->hasTrackableFields)
+                            instance->trackMutex = std::make_shared<std::shared_mutex>();
 
                         m_stack[m_stack.size() - 1 - argCount] = instance;
 
@@ -686,6 +688,19 @@ private:
                     klass->fields.push_back(fieldName);
                     break;
                 }
+                case OP_FIELD_TRACKABLE:
+                {
+                    Value fieldNameVal = ReadConstant();
+                    std::string fieldName = *std::get<StringPtr>(fieldNameVal);
+
+                    Value klassVal = m_stack.back();
+                    auto klass = Expect<KlassPtr>(klassVal, "OP_FIELD_TRACKABLE expects a class");
+
+                    klass->fields.push_back(fieldName);
+                    klass->trackableFields.insert(fieldName);
+                    klass->hasTrackableFields = true;
+                    break;
+                }
                 case OP_STATIC_FIELD:
                 {
                     Value fieldNameVal = ReadConstant();
@@ -830,7 +845,15 @@ private:
                     if (instance->fields.contains(propName))
                     {
                         Pop();
-                        Push(instance->fields[propName]);
+                        if (instance->trackMutex && instance->klass->trackableFields.count(propName))
+                        {
+                            std::shared_lock<std::shared_mutex> lock(*instance->trackMutex);
+                            Push(instance->fields[propName]);
+                        }
+                        else
+                        {
+                            Push(instance->fields[propName]);
+                        }
                         break;
                     }
 
@@ -882,7 +905,16 @@ private:
                         throw std::runtime_error("Error: Class '" + instance->klass->name + "' has no property '" + propName + "'.");
                     }
 
-                    instance->fields[propName] = CloneIfStruct(valueToSet);
+                    if (instance->trackMutex && instance->klass->trackableFields.count(propName))
+                    {
+                        std::unique_lock<std::shared_mutex> lock(*instance->trackMutex);
+                        instance->fields[propName] = CloneIfStruct(valueToSet);
+                        instance->version.fetch_add(1, std::memory_order_release);
+                    }
+                    else
+                    {
+                        instance->fields[propName] = CloneIfStruct(valueToSet);
+                    }
                     Push(valueToSet);
                     break;
                 }
@@ -1237,6 +1269,13 @@ private:
             m_uiRenderer.ClearFocus();
             return false;
         });
+
+        DefineNative("UIGetVersion", [](const std::vector<Value>& args) -> Value {
+            if (args.empty()) return (int64_t)0;
+            if (!std::holds_alternative<InstancePtr>(args[0])) return (int64_t)0;
+            auto inst = std::get<InstancePtr>(args[0]);
+            return inst->version.load(std::memory_order_acquire);
+        });
     }
 
     InstancePtr MakeResult(bool ok, const Value& value, const std::string& error) {
@@ -1310,32 +1349,29 @@ private:
 
     void DefineNativeAsyncFunctions()
     {
-        DefineNative("Async", [this](const std::vector<Value>& args) -> Value {
+        // Low-level: spawn a closure in a detached thread, fire-and-forget
+        auto spawnImpl = [this](const std::vector<Value>& args) -> Value {
             if (args.empty()) return Null{};
             if (!std::holds_alternative<ClosurePtr>(args[0])) return Null{};
 
             ClosurePtr closure = std::get<ClosurePtr>(args[0]);
-
             auto globals = m_globals;
 
-            auto promise = std::make_shared<std::promise<Value>>();
-            auto future = std::make_shared<AsyncFuture>();
-            future->result = promise->get_future().share();
-
-            std::thread([closure, globals = std::move(globals), promise = std::move(promise)]() mutable {
+            std::thread([closure, globals = std::move(globals)]() mutable {
                 try {
                     VirtualMachine vm(false);
                     for (auto& [name, val] : globals)
                         vm.DefineGlobal(name, val);
-                    Value result = vm.CallClosure(closure, {});
-                    promise->set_value(result);
-                } catch (...) {
-                    try { promise->set_exception(std::current_exception()); }
-                    catch (...) {}
-                }
+                    vm.CallClosure(closure, {});
+                } catch (...) {}
             }).detach();
 
-            return future;
-        });
+            return Null{};
+        };
+
+        DefineNative("spawn", spawnImpl);
+
+        // High-level: Async { } — syntactic sugar over spawn, called as trailing closure
+        DefineNative("Async", spawnImpl);
     }
 };
