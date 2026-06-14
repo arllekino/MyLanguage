@@ -46,26 +46,39 @@ struct UIVertex
 class UIRenderer
 {
 public:
-    GLFWwindow* window = nullptr;
-    std::unique_ptr<Program> uiProgram;
-    GLuint vao = 0, vbo = 0;
-    std::vector<UIVertex> vertices;
+    GLFWwindow* m_window = nullptr;
+    std::unique_ptr<Program> m_uiProgram;
+    GLuint m_vao = 0, m_vbo = 0;
+    std::vector<UIVertex> m_vertices;
 
-    float mouseX = 0, mouseY = 0;
-    bool  mouseDown = false;
-    bool  mouseDownPrev = false;
+    float m_mouseX = 0, m_mouseY = 0;
+    bool m_mouseDown = false;
+    bool m_mouseDownPrev = false;
+    bool m_mouseMoved = false;
+    bool m_mouseJustPressed = false;
 
-    float scrollDeltaY = 0.0f;
+    float m_scrollDeltaY = 0.0f;
 
-    std::string pendingText;
-    bool backspacePressed = false;
-    bool enterPressed = false;
+    std::string m_pendingText;
+    bool m_backspacePressed = false;
+    bool m_enterPressed = false;
 
     std::string m_focusedId;
 
-    void SetFocused(const std::string& id) { m_focusedId = id; }
-    void ClearFocus() { m_focusedId = ""; }
-    bool IsFocused(const std::string& id) { return m_focusedId == id; }
+    void SetFocused(const std::string& id)
+    {
+        m_focusedId = id;
+    }
+
+    void ClearFocus()
+    {
+        m_focusedId = "";
+    }
+
+    bool IsFocused(const std::string& id)
+    {
+        return m_focusedId == id;
+    }
 
     void Init(int width, int height, const std::string& title)
     {
@@ -78,36 +91,53 @@ public:
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
         glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
 
-        window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
-        if (!window)
+        m_window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+        if (!m_window)
             throw std::runtime_error("Failed to create GLFW window");
 
-        glfwMakeContextCurrent(window);
+        glfwMakeContextCurrent(m_window);
+        glfwSwapInterval(1);
         if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)))
             throw std::runtime_error("Failed to initialize GLAD");
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        glfwSetWindowUserPointer(window, this);
+        glfwSetWindowUserPointer(m_window, this);
 
-        glfwSetCharCallback(window, [](GLFWwindow* w, unsigned int codepoint) {
+        glfwSetCharCallback(m_window, [](GLFWwindow* w, unsigned int codepoint) {
             auto* r = static_cast<UIRenderer*>(glfwGetWindowUserPointer(w));
             if (codepoint < 128)
-                r->pendingText += static_cast<char>(codepoint);
+                r->m_pendingText += static_cast<char>(codepoint);
         });
 
-        glfwSetKeyCallback(window, [](GLFWwindow* w, int key, int /*scancode*/, int action, int /*mods*/) {
+        glfwSetKeyCallback(m_window, [](GLFWwindow* w, int key, int /*scancode*/, int action, int /*mods*/) {
             auto* r = static_cast<UIRenderer*>(glfwGetWindowUserPointer(w));
             if (action == GLFW_PRESS || action == GLFW_REPEAT) {
-                if (key == GLFW_KEY_BACKSPACE) r->backspacePressed = true;
-                if (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) r->enterPressed = true;
+                if (key == GLFW_KEY_BACKSPACE) r->m_backspacePressed = true;
+                if (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER) r->m_enterPressed = true;
             }
         });
 
-        glfwSetScrollCallback(window, [](GLFWwindow* w, double /*dx*/, double dy) {
+        glfwSetScrollCallback(m_window, [](GLFWwindow* w, double /*dx*/, double dy) {
             auto* r = static_cast<UIRenderer*>(glfwGetWindowUserPointer(w));
-            r->scrollDeltaY += static_cast<float>(dy);
+            r->m_scrollDeltaY += static_cast<float>(dy);
+        });
+
+        glfwSetCursorPosCallback(m_window, [](GLFWwindow* w, double /*x*/, double /*y*/) {
+            static_cast<UIRenderer*>(glfwGetWindowUserPointer(w))->m_mouseMoved = true;
+        });
+
+        glfwSetMouseButtonCallback(m_window, [](GLFWwindow* w, int button, int action, int /*mods*/) {
+            auto* r = static_cast<UIRenderer*>(glfwGetWindowUserPointer(w));
+            if (button == GLFW_MOUSE_BUTTON_LEFT) {
+                if (action == GLFW_PRESS) {
+                    r->m_mouseJustPressed = true;
+                    r->m_mouseDown = true;
+                } else if (action == GLFW_RELEASE) {
+                    r->m_mouseDown = false;
+                }
+            }
         });
 
         SetupBuffers();
@@ -120,49 +150,66 @@ public:
         m_logicalHeight = height;
     }
 
+    // Returns true if any user input arrived (mouse move/click, key, scroll).
+    // Clears previous frame's input state and waits for events (blocking if !alreadyDirty).
+    bool WaitOrPoll(bool alreadyDirty)
+    {
+        m_pendingText      = "";
+        m_backspacePressed = false;
+        m_enterPressed     = false;
+        m_scrollDeltaY     = 0.0f;
+        m_mouseMoved       = false;
+        m_mouseJustPressed = false;  // cleared before polling; callback sets it during poll
+        m_mouseDownPrev    = m_mouseDown;
+
+        if (alreadyDirty)
+            glfwPollEvents();
+        else
+            glfwWaitEventsTimeout(1.0 / 60.0);
+
+        double mx, my;
+        glfwGetCursorPos(m_window, &mx, &my);
+        m_mouseX = static_cast<float>(mx);
+        m_mouseY = static_cast<float>(my);
+        // m_mouseDown is now maintained by the mouse button callback
+
+        return m_mouseJustPressed
+            || (m_mouseDown != m_mouseDownPrev)
+            || !m_pendingText.empty()
+            || m_backspacePressed
+            || m_enterPressed
+            || m_scrollDeltaY != 0.0f;
+    }
+
     void BeginFrame(int windowWidth, int windowHeight)
     {
         m_logicalWidth  = windowWidth;
         m_logicalHeight = windowHeight;
         m_projection = glm::ortho(0.0f, static_cast<float>(windowWidth),
                                   static_cast<float>(windowHeight), 0.0f, -1.0f, 1.0f);
-        vertices.clear();
+        m_vertices.clear();
         m_textRenderer.BeginFrame();
 
-        mouseDownPrev = mouseDown;
-        double mx, my;
-        glfwGetCursorPos(window, &mx, &my);
-        mouseX    = static_cast<float>(mx);
-        mouseY    = static_cast<float>(my);
-        mouseDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-
-        pendingText      = "";
-        backspacePressed = false;
-        enterPressed     = false;
-        scrollDeltaY     = 0.0f;
-
-        glfwPollEvents();
-
         int fbWidth, fbHeight;
-        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+        glfwGetFramebufferSize(m_window, &fbWidth, &fbHeight);
         glViewport(0, 0, fbWidth, fbHeight);
-        glClearColor(0.1f, 0.1f, 0.11f, 1.0f);
+        glClearColor(0.94f, 0.95f, 0.97f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glUseProgram(uiProgram->GetId());
-        GLint projLoc = glGetUniformLocation(uiProgram->GetId(), "uProjection");
+        glUseProgram(m_uiProgram->GetId());
+        GLint projLoc = glGetUniformLocation(m_uiProgram->GetId(), "uProjection");
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, &m_projection[0][0]);
     }
 
     void DrawRect(float x, float y, float w, float h, glm::vec4 color)
     {
-        vertices.push_back({{x,     y    }, color});
-        vertices.push_back({{x + w, y    }, color});
-        vertices.push_back({{x,     y + h}, color});
+        m_vertices.push_back({{x,     y    }, color});
+        m_vertices.push_back({{x + w, y    }, color});
+        m_vertices.push_back({{x,     y + h}, color});
 
-        vertices.push_back({{x + w, y    }, color});
-        vertices.push_back({{x + w, y + h}, color});
-        vertices.push_back({{x,     y + h}, color});
+        m_vertices.push_back({{x + w, y    }, color});
+        m_vertices.push_back({{x + w, y + h}, color});
+        m_vertices.push_back({{x,     y + h}, color});
     }
 
     void DrawRoundedRect(float x, float y, float w, float h, float radius, glm::vec4 color)
@@ -188,9 +235,9 @@ public:
             {
                 float a0 = c.startAngle + static_cast<float>(i)     * static_cast<float>(M_PI * 0.5 / kSegs);
                 float a1 = c.startAngle + static_cast<float>(i + 1) * static_cast<float>(M_PI * 0.5 / kSegs);
-                vertices.push_back({{c.cx,                   c.cy                  }, color});
-                vertices.push_back({{c.cx + r * cosf(a0),   c.cy + r * sinf(a0)   }, color});
-                vertices.push_back({{c.cx + r * cosf(a1),   c.cy + r * sinf(a1)   }, color});
+                m_vertices.push_back({{c.cx,                   c.cy                  }, color});
+                m_vertices.push_back({{c.cx + r * cosf(a0),   c.cy + r * sinf(a0)   }, color});
+                m_vertices.push_back({{c.cx + r * cosf(a1),   c.cy + r * sinf(a1)   }, color});
             }
         }
     }
@@ -205,19 +252,25 @@ public:
         return m_textRenderer.MeasureWidth(text, fontSize);
     }
 
-    bool IsMouseJustPressed()  const { return mouseDown && !mouseDownPrev; }
-    bool IsMouseJustReleased() const { return !mouseDown && mouseDownPrev; }
+    bool IsMouseJustPressed() const
+    {
+        return m_mouseJustPressed;
+    }
 
-    float GetScrollDelta() const { return scrollDeltaY; }
+    bool IsMouseJustReleased() const {
+        return !m_mouseDown && m_mouseDownPrev;
+    }
+
+    float GetScrollDelta() const { return m_scrollDeltaY; }
 
     void FlushBatch()
     {
-        if (vertices.empty()) return;
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(UIVertex), vertices.data());
-        glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
-        vertices.clear();
+        if (m_vertices.empty()) return;
+        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, m_vertices.size() * sizeof(UIVertex), m_vertices.data());
+        glBindVertexArray(m_vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_vertices.size()));
+        m_vertices.clear();
     }
 
     void BeginClip(float x, float y, float w, float h)
@@ -226,7 +279,7 @@ public:
         m_textRenderer.FlushBatch(m_projection);
 
         int fbWidth, fbHeight;
-        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+        glfwGetFramebufferSize(m_window, &fbWidth, &fbHeight);
         float scaleX = static_cast<float>(fbWidth)  / static_cast<float>(m_logicalWidth);
         float scaleY = static_cast<float>(fbHeight) / static_cast<float>(m_logicalHeight);
 
@@ -248,38 +301,48 @@ public:
 
     void EndFrame()
     {
-        if (!vertices.empty()) {
-            glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        if (!m_vertices.empty())
+        {
+            glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
             glBufferSubData(GL_ARRAY_BUFFER, 0,
-                            vertices.size() * sizeof(UIVertex), vertices.data());
-            glBindVertexArray(vao);
-            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
+                            m_vertices.size() * sizeof(UIVertex), m_vertices.data());
+            glBindVertexArray(m_vao);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_vertices.size()));
         }
 
         m_textRenderer.EndFrame(m_projection);
 
-        glfwSwapBuffers(window);
+        glfwSwapBuffers(m_window);
     }
 
     ~UIRenderer()
     {
-        if (vao) glDeleteVertexArrays(1, &vao);
-        if (vbo) glDeleteBuffers(1, &vbo);
-        if (window) glfwDestroyWindow(window);
+        if (m_vao)
+        {
+            glDeleteVertexArrays(1, &m_vao);
+        }
+        if (m_vbo)
+        {
+            glDeleteBuffers(1, &m_vbo);
+        }
+        if (m_window)
+        {
+            glfwDestroyWindow(m_window);
+        }
         glfwTerminate();
     }
 
 private:
     TextRenderer m_textRenderer;
-    glm::mat4    m_projection{1.0f};
-    int          m_logicalWidth  = 800;
-    int          m_logicalHeight = 600;
+    glm::mat4 m_projection{1.0f};
+    int m_logicalWidth = 800;
+    int m_logicalHeight = 600;
 
     void SetupBuffers() {
-        glGenVertexArrays(1, &vao);
-        glGenBuffers(1, &vbo);
-        glBindVertexArray(vao);
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glGenVertexArrays(1, &m_vao);
+        glGenBuffers(1, &m_vbo);
+        glBindVertexArray(m_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
         glBufferData(GL_ARRAY_BUFFER, 65536 * sizeof(UIVertex), nullptr, GL_DYNAMIC_DRAW);
 
         glEnableVertexAttribArray(0);
@@ -292,6 +355,6 @@ private:
 
     void InitShaders()
     {
-        uiProgram = std::make_unique<Program>(vertexShaderCode, fragmentShaderCode);
+        m_uiProgram = std::make_unique<Program>(vertexShaderCode, fragmentShaderCode);
     }
 };

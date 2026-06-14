@@ -10,7 +10,7 @@ struct StatusButtonView : View {
         if (self.vm.viewState.formStatus == self.value) {
             return Button(self.label, Color.blue) { self.vm.viewState.formStatus = self.value }
         }
-        return Button(self.label, Color(0.28, 0.28, 0.33)) { self.vm.viewState.formStatus = self.value }
+        return Button(self.label, Color(0.38, 0.42, 0.52)) { self.vm.viewState.formStatus = self.value }
     }
 
     init(label: String, value: String, vm: TaskViewModel) {
@@ -26,33 +26,36 @@ struct FormSectionView : View {
     let view: any View {
         let items = []
         if (self.vm.viewState.editingId != "") {
-            items.append(Text("Edit Task " + self.vm.viewState.editingId, 13.0, Color.orange))
+            items.append(Text("Edit Task  #" + self.vm.viewState.editingId, 14.0, Color(0.07, 0.08, 0.12)))
         }
         if (self.vm.viewState.editingId == "") {
-            items.append(Text("New Task", 13.0, Color.white))
+            items.append(Text("New Task", 14.0, Color(0.07, 0.08, 0.12)))
         }
-        items.append(TextField("titleField", self.vm.viewState.formTitle, 320.0) {
+        items.append(Text("Title", 11.0, Color(0.42, 0.47, 0.57)))
+        items.append(TextField("titleField", self.vm.viewState.formTitle, 250.0) {
             self.vm.viewState.formTitle = it
         })
-        items.append(TextField("descField", self.vm.viewState.formDesc, 320.0) {
+        items.append(Text("Description", 11.0, Color(0.42, 0.47, 0.57)))
+        items.append(TextField("descField", self.vm.viewState.formDesc, 250.0) {
             self.vm.viewState.formDesc = it
         })
+        items.append(Text("Status", 11.0, Color(0.42, 0.47, 0.57)))
         items.append(HBox(6.0, VAlign.center) {
             return [
                 StatusButtonView("Todo", "todo", self.vm),
-                StatusButtonView("In Progress", "in_progress", self.vm),
-                StatusButtonView("Resolved", "resolved", self.vm)
+                StatusButtonView("In Prog", "in_progress", self.vm),
+                StatusButtonView("Done", "resolved", self.vm)
             ]
         })
         items.append(HBox(8.0, VAlign.center) {
             return [
                 Button("Save", Color.blue) { self.vm.save() },
-                Button("Reset", Color(0.3, 0.3, 0.36)) { self.vm.reset() }
+                Button("Cancel", Color(0.38, 0.42, 0.52)) { self.vm.reset() }
             ]
         })
         return VBox(8.0, HAlign.start) {
             return items
-        }.padding(12.0).background(Color(0.14, 0.14, 0.17), 1.0).cornerRadius(8.0)
+        }.padding(16.0).background(Color.white, 1.0).cornerRadius(8.0)
     }
 
     init(vm: TaskViewModel) {

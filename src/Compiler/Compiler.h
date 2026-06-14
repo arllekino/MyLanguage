@@ -60,10 +60,12 @@ public:
         m_functions["UIDrawText"] = {
             TypeInfo::Simple(TypeKind::Void),
             {
-                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double),
                 TypeInfo::Simple(TypeKind::String),
                 TypeInfo::Simple(TypeKind::Double),
-                TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double),
+                TypeInfo::Simple(TypeKind::Double),
                 TypeInfo::Simple(TypeKind::Double)
             }
         };
@@ -86,13 +88,20 @@ public:
         m_functions["UIIsFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
         m_functions["UIClearFocus"] = { TypeInfo::Simple(TypeKind::Bool), {} };
         m_functions["UIGetVersion"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
-        m_functions["UIIsDirty"]           = { TypeInfo::Simple(TypeKind::Bool), {} };
-        m_functions["UIGetScrollDelta"]    = { TypeInfo::Simple(TypeKind::Double), {} };
-        m_functions["UIBeginClip"]         = { TypeInfo::Simple(TypeKind::Void), {
+        m_functions["UIIsDirty"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+        m_functions["UIWaitEvents"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+        m_functions["UIViewIsDirty"] = { TypeInfo::Simple(TypeKind::Bool), {} };
+        m_functions["UIGetScrollDelta"] = { TypeInfo::Simple(TypeKind::Double), {} };
+
+        m_functions["UITextBufGet"] = { TypeInfo::Simple(TypeKind::String), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["UITextBufSet"] = { TypeInfo::Simple(TypeKind::Void), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["UITextBufLastSeen"] = { TypeInfo::Simple(TypeKind::String), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["UITextBufSetLastSeen"] = { TypeInfo::Simple(TypeKind::Void), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["UIBeginClip"] = { TypeInfo::Simple(TypeKind::Void), {
             TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
             TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double)
         } };
-        m_functions["UIEndClip"]           = { TypeInfo::Simple(TypeKind::Void), {} };
+        m_functions["UIEndClip"] = { TypeInfo::Simple(TypeKind::Void), {} };
         m_functions["UIDrawRoundedRect"] = { TypeInfo::Simple(TypeKind::Any), {
             TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
             TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
@@ -101,28 +110,28 @@ public:
             TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double)
         } };
 
-        m_functions["ResultOk"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
+        m_functions["ResultOk"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
         m_functions["ResultError"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
 
-        m_functions["JsonParse"]     = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["JsonParse"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
         m_functions["JsonStringify"] = { TypeInfo::Simple(TypeKind::String), { TypeInfo::Simple(TypeKind::Any) } };
 
-        m_functions["HttpGet"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
-        m_functions["HttpPost"]   = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
-        m_functions["HttpPut"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["HttpGet"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
+        m_functions["HttpPost"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["HttpPut"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String), TypeInfo::Simple(TypeKind::String) } };
         m_functions["HttpDelete"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
 
         m_functions["Async"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
 
-        m_functions["DateNow"]       = { TypeInfo::Simple(TypeKind::Double), {} };
+        m_functions["DateNow"] = { TypeInfo::Simple(TypeKind::Double), {} };
         m_functions["DateTimestamp"] = { TypeInfo::Simple(TypeKind::Double), {} };
-        m_functions["DateFormat"]    = { TypeInfo::Simple(TypeKind::String), { TypeInfo::Simple(TypeKind::Any), TypeInfo::Simple(TypeKind::String) } };
-        m_functions["DateYear"]      = { TypeInfo::Simple(TypeKind::Int), {} };
-        m_functions["DateMonth"]     = { TypeInfo::Simple(TypeKind::Int), {} };
-        m_functions["DateDay"]       = { TypeInfo::Simple(TypeKind::Int), {} };
-        m_functions["DateHour"]      = { TypeInfo::Simple(TypeKind::Int), {} };
-        m_functions["DateMinute"]    = { TypeInfo::Simple(TypeKind::Int), {} };
-        m_functions["DateSecond"]    = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateFormat"] = { TypeInfo::Simple(TypeKind::String), { TypeInfo::Simple(TypeKind::Any), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["DateYear"] = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateMonth"] = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateDay"] = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateHour"] = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateMinute"] = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateSecond"] = { TypeInfo::Simple(TypeKind::Int), {} };
 
         ClassInfo dateClassInfo;
         dateClassInfo.name = "Date";

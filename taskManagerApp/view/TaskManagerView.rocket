@@ -8,16 +8,30 @@ struct TaskManagerView : View {
 
     let view: any View {
         self.vm.ensureLoaded()
-        return VBox(16.0, HAlign.start) {
+        let primaryColor = Color(0.07, 0.08, 0.12)
+        let secondaryColor = Color(0.42, 0.47, 0.57)
+
+        return VBox(0.0, HAlign.start) {
             return [
-                Text("Pipeline Board", 20.0, Color.white),
+                HBox(20.0, VAlign.center) {
+                    return [
+                        VBox(3.0, HAlign.start) {
+                            return [
+                                Text("TASK TRACKER", 9.0, secondaryColor),
+                                Text("Pipeline board", 21.0, primaryColor)
+                            ]
+                        },
+                        Button("Refresh", Color(0.35, 0.38, 0.45)) { self.vm.refresh() },
+                        Button("Demo Token", Color.blue) { self.vm.getDemoToken() }
+                    ]
+                }.padding(20.0).background(Color.white, 1.0),
                 HBox(16.0, VAlign.top) {
                     return [
                         PipelineBoardView(self.vm),
                         SidebarView(self.vm)
                     ]
-                }
+                }.padding(16.0)
             ]
-        }.padding(24.0)
+        }
     }
 }

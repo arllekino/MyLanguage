@@ -8,22 +8,33 @@ struct KanbanColumnView : View {
     let tasks: Array<Task>
     let vm: TaskViewModel
 
+    func displayTitle(s: String): String {
+        if (s == "todo") { return "Todo" }
+        if (s == "in_progress") { return "In Progress" }
+        if (s == "resolved") { return "Resolved" }
+        return s
+    }
+
     let view: any View {
+        let countBadge = Text(" " + self.tasks.count + " ", 10.0, Color.white).padding(3.0).background(Color(0.52, 0.57, 0.67), 1.0).cornerRadius(8.0)
+
         let items = [HBox(8.0, VAlign.center) {
             return [
-                Text(self.colTitle, 13.0, Color.white),
-                Text("  " + self.tasks.count, 12.0, Color(0.5, 0.5, 0.58))
+                Text(self.displayTitle(self.colTitle), 13.0, Color(0.07, 0.08, 0.12)),
+                countBadge
             ]
         }]
         if (self.tasks.count == 0) {
-            items.append(Text("No cards in this lane", 11.0, Color(0.4, 0.4, 0.48)))
+            items.append(
+                Text("No cards in this lane", 11.0, Color(0.55, 0.6, 0.67)).padding(12.0)
+            )
         }
         self.tasks.forEach { task in
             items.append(TaskCardView(task, self.vm))
         }
         return VBox(8.0, HAlign.start) {
             return items
-        }.padding(12.0).background(Color(0.14, 0.14, 0.17), 1.0).cornerRadius(10.0)
+        }.padding(12.0).background(Color(0.93, 0.94, 0.96), 1.0).cornerRadius(10.0)
     }
 
     init(colTitle: String, tasks: Array<Task>, vm: TaskViewModel) {

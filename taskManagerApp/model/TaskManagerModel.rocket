@@ -43,4 +43,12 @@ class TaskManagerModel {
             }
         }
     }
+
+    func summarizeTasks(tasks: Array<Task>): String {
+        return self.gateway.summarizeTasks(tasks)
+    }
+
+    func highlightTasks(tasks: Array<Task>): String {
+        return self.gateway.highlightTasks(tasks)
+    }
 }

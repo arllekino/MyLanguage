@@ -111,6 +111,10 @@ private:
     UIRenderer m_uiRenderer;
     bool m_uiInitialized = false;
     std::atomic<bool> m_uiDirty{false};
+    std::atomic<bool> m_viewDirty{true};
+
+    std::unordered_map<std::string, std::string> m_textBufs;
+    std::unordered_map<std::string, std::string> m_textBufLastSeen;
 
     KlassPtr m_jsonObjectKlass;
     KlassPtr m_resultKlass;
@@ -1120,6 +1124,7 @@ private:
                         instance->fields[propName] = CloneIfStruct(valueToSet);
                         instance->version.fetch_add(1, std::memory_order_release);
                         m_uiDirty.store(true, std::memory_order_release);
+                        m_viewDirty.store(true, std::memory_order_release);
                     }
                     else
                     {
@@ -1363,17 +1368,14 @@ private:
             {
                 return true;
             }
-            return glfwWindowShouldClose(m_uiRenderer.window) != 0;
+            return glfwWindowShouldClose(m_uiRenderer.m_window) != 0;
         });
 
         DefineNative("UIBeginFrame", [this](const std::vector<Value>& args) -> Value {
             int64_t width = Expect<int64_t>(args[0], "width must be Int");
             int64_t height = Expect<int64_t>(args[1], "height must be Int");
-            if (m_uiInitialized) {
+            if (m_uiInitialized)
                 m_uiRenderer.BeginFrame(static_cast<int>(width), static_cast<int>(height));
-                if (m_uiRenderer.GetScrollDelta() != 0.0f)
-                    m_uiDirty.store(true, std::memory_order_release);
-            }
             return Null{};
         });
 
@@ -1454,17 +1456,17 @@ private:
 
         DefineNative("UIGetMouseX", [this](const std::vector<Value>& args) -> Value {
             if (!m_uiInitialized) return 0.0;
-            return static_cast<double>(m_uiRenderer.mouseX);
+            return static_cast<double>(m_uiRenderer.m_mouseX);
         });
 
         DefineNative("UIGetMouseY", [this](const std::vector<Value>& args) -> Value {
             if (!m_uiInitialized) return 0.0;
-            return static_cast<double>(m_uiRenderer.mouseY);
+            return static_cast<double>(m_uiRenderer.m_mouseY);
         });
 
         DefineNative("UIIsMouseDown", [this](const std::vector<Value>& args) -> Value {
             if (!m_uiInitialized) return false;
-            return m_uiRenderer.mouseDown;
+            return m_uiRenderer.m_mouseDown;
         });
 
         DefineNative("UIIsMouseJustPressed", [this](const std::vector<Value>& args) -> Value {
@@ -1474,17 +1476,17 @@ private:
 
         DefineNative("UIGetPendingText", [this](const std::vector<Value>& args) -> Value {
             if (!m_uiInitialized) return std::make_shared<std::string>("");
-            return std::make_shared<std::string>(m_uiRenderer.pendingText);
+            return std::make_shared<std::string>(m_uiRenderer.m_pendingText);
         });
 
         DefineNative("UIIsBackspacePressed", [this](const std::vector<Value>& args) -> Value {
             if (!m_uiInitialized) return false;
-            return m_uiRenderer.backspacePressed;
+            return m_uiRenderer.m_backspacePressed;
         });
 
         DefineNative("UIIsEnterPressed", [this](const std::vector<Value>& args) -> Value {
             if (!m_uiInitialized) return false;
-            return m_uiRenderer.enterPressed;
+            return m_uiRenderer.m_enterPressed;
         });
 
         DefineNative("UISetFocused", [this](const std::vector<Value>& args) -> Value {
@@ -1517,6 +1519,53 @@ private:
 
         DefineNative("UIIsDirty", [this](const std::vector<Value>& args) -> Value {
             return m_uiDirty.exchange(false, std::memory_order_acq_rel);
+        });
+
+        DefineNative("UIWaitEvents", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return false;
+            bool alreadyDirty = m_uiDirty.load(std::memory_order_acquire);
+            bool inputDirty = m_uiRenderer.WaitOrPoll(alreadyDirty);
+            if (inputDirty)
+                m_uiDirty.store(true, std::memory_order_release);
+            if (m_uiRenderer.GetScrollDelta() != 0.0f) {
+                m_uiDirty.store(true, std::memory_order_release);
+                m_viewDirty.store(true, std::memory_order_release);
+            }
+            return m_uiDirty.exchange(false, std::memory_order_acq_rel);
+        });
+
+        DefineNative("UIViewIsDirty", [this](const std::vector<Value>& args) -> Value {
+            return m_viewDirty.exchange(false, std::memory_order_acq_rel);
+        });
+
+        DefineNative("UITextBufGet", [this](const std::vector<Value>& args) -> Value {
+            auto id = Expect<StringPtr>(args[0], "fieldId must be String");
+            auto it = m_textBufs.find(*id);
+            if (it != m_textBufs.end())
+                return std::make_shared<std::string>(it->second);
+            return std::make_shared<std::string>("");
+        });
+
+        DefineNative("UITextBufSet", [this](const std::vector<Value>& args) -> Value {
+            auto id   = Expect<StringPtr>(args[0], "fieldId must be String");
+            auto text = Expect<StringPtr>(args[1], "text must be String");
+            m_textBufs[*id] = *text;
+            return Null{};
+        });
+
+        DefineNative("UITextBufLastSeen", [this](const std::vector<Value>& args) -> Value {
+            auto id = Expect<StringPtr>(args[0], "fieldId must be String");
+            auto it = m_textBufLastSeen.find(*id);
+            if (it != m_textBufLastSeen.end())
+                return std::make_shared<std::string>(it->second);
+            return std::make_shared<std::string>("\x01");
+        });
+
+        DefineNative("UITextBufSetLastSeen", [this](const std::vector<Value>& args) -> Value {
+            auto id   = Expect<StringPtr>(args[0], "fieldId must be String");
+            auto text = Expect<StringPtr>(args[1], "text must be String");
+            m_textBufLastSeen[*id] = *text;
+            return Null{};
         });
 
         DefineNative("UIGetScrollDelta", [this](const std::vector<Value>& args) -> Value {

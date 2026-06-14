@@ -272,19 +272,10 @@ struct TextField : View {
     func draw(x: Double, y: Double) {
         let focused = UIIsFocused(self.fieldId)
 
-        if (focused) {
-            UIDrawRoundedRect(x, y, self.width, self.height, 6.0, 0.25, 0.55, 1.0, 1.0)
-        }
-        if (focused == false) {
-            UIDrawRoundedRect(x, y, self.width, self.height, 6.0, 0.4, 0.4, 0.45, 1.0)
-        }
-        UIDrawRoundedRect(x + 2.0, y + 2.0, self.width - 4.0, self.height - 4.0, 5.0, 0.12, 0.12, 0.14, 1.0)
-
-        if (focused) {
-            UIDrawText(x + 8.0, y + (self.height - self.fontSize) / 2.0, self.value + "|", self.fontSize, 1.0, 1.0, 1.0)
-        }
-        if (focused == false) {
-            UIDrawText(x + 8.0, y + (self.height - self.fontSize) / 2.0, self.value, self.fontSize, 0.75, 0.75, 0.78)
+        let lastSeen = UITextBufLastSeen(self.fieldId)
+        if (self.value != lastSeen) {
+            UITextBufSet(self.fieldId, self.value)
+            UITextBufSetLastSeen(self.fieldId, self.value)
         }
 
         if (UIIsMouseJustPressed()) {
@@ -296,16 +287,36 @@ struct TextField : View {
         }
 
         if (focused) {
+            let pre = UITextBufGet(self.fieldId)
             let typed = UIGetPendingText()
             if (typed != "") {
-                self.onChange(self.value + typed)
+                UITextBufSet(self.fieldId, pre + typed)
+                self.onChange(pre + typed)
             }
             if (UIIsBackspacePressed()) {
-                let len = self.value.count
-                if (len > 0) {
-                    self.onChange(self.value.dropLast())
+                if (pre.count > 0) {
+                    let trimmed = pre.dropLast()
+                    UITextBufSet(self.fieldId, trimmed)
+                    self.onChange(trimmed)
                 }
             }
+        }
+
+        let current = UITextBufGet(self.fieldId)
+
+        if (focused) {
+            UIDrawRoundedRect(x, y, self.width, self.height, 6.0, 0.23, 0.51, 0.96, 1.0)
+        }
+        if (focused == false) {
+            UIDrawRoundedRect(x, y, self.width, self.height, 6.0, 0.82, 0.84, 0.88, 1.0)
+        }
+        UIDrawRoundedRect(x + 2.0, y + 2.0, self.width - 4.0, self.height - 4.0, 5.0, 1.0, 1.0, 1.0, 1.0)
+
+        if (focused) {
+            UIDrawText(x + 8.0, y + (self.height - self.fontSize) / 2.0, current + "|", self.fontSize, 0.07, 0.08, 0.12)
+        }
+        if (focused == false) {
+            UIDrawText(x + 8.0, y + (self.height - self.fontSize) / 2.0, current, self.fontSize, 0.42, 0.47, 0.57)
         }
     }
 
@@ -337,7 +348,10 @@ struct VBox : View {
         self.height   = 0.0
         self.spacing  = space
         self.align    = align
-        self.children = content()
+        let raw = content()
+        let resolved = []
+        raw.forEach { resolved.append(unwrap(it)) }
+        self.children = resolved
         self.calculateSizes()
     }
 
@@ -346,10 +360,9 @@ struct VBox : View {
         let maxWidth    = 0.0
         let count       = self.children.count
         self.children.forEach {
-            let node = unwrap(it)
-            totalHeight = totalHeight + node.height
-            if (node.width > maxWidth) {
-                maxWidth = node.width
+            totalHeight = totalHeight + it.height
+            if (it.width > maxWidth) {
+                maxWidth = it.width
             }
         }
         if (count > 1) {
@@ -368,9 +381,8 @@ struct VBox : View {
     func draw(x: Double, y: Double) {
         let currentY = y
         self.children.forEach {
-            let node = unwrap(it)
-            node.draw(self.alignedX(x, node.width), currentY)
-            currentY = currentY + node.height + self.spacing
+            it.draw(self.alignedX(x, it.width), currentY)
+            currentY = currentY + it.height + self.spacing
         }
     }
 
@@ -410,7 +422,10 @@ struct HBox : View {
         self.height   = 0.0
         self.spacing  = space
         self.align    = align
-        self.children = content()
+        let raw = content()
+        let resolved = []
+        raw.forEach { resolved.append(unwrap(it)) }
+        self.children = resolved
         self.calculateSizes()
     }
 
@@ -419,10 +434,9 @@ struct HBox : View {
         let maxHeight  = 0.0
         let count      = self.children.count
         self.children.forEach {
-            let node = unwrap(it)
-            totalWidth = totalWidth + node.width
-            if (node.height > maxHeight) {
-                maxHeight = node.height
+            totalWidth = totalWidth + it.width
+            if (it.height > maxHeight) {
+                maxHeight = it.height
             }
         }
         if (count > 1) {
@@ -441,9 +455,8 @@ struct HBox : View {
     func draw(x: Double, y: Double) {
         let currentX = x
         self.children.forEach {
-            let node = unwrap(it)
-            node.draw(currentX, self.alignedY(y, node.height))
-            currentX = currentX + node.width + self.spacing
+            it.draw(currentX, self.alignedY(y, it.height))
+            currentX = currentX + it.width + self.spacing
         }
     }
 
@@ -518,13 +531,20 @@ class App {
         let screenHeight = height * 1.0
         UIInitWindow(width, height, title)
         let rootView = content()
+        let rootNode = unwrap(rootView)
+        let startX = (screenWidth  - rootNode.width)  / 2.0
+        let startY = (screenHeight - rootNode.height) / 2.0
         while (UIShouldClose() == false) {
-            UIBeginFrame(width, height)
-            let rootNode = unwrap(rootView)
-            let startX = (screenWidth  - rootNode.width)  / 2.0
-            let startY = (screenHeight - rootNode.height) / 2.0
-            rootNode.draw(startX, startY)
-            UIEndFrame()
+            if (UIWaitEvents()) {
+                UIBeginFrame(width, height)
+                if (UIViewIsDirty()) {
+                    rootNode = unwrap(rootView)
+                    startX = (screenWidth  - rootNode.width)  / 2.0
+                    startY = (screenHeight - rootNode.height) / 2.0
+                }
+                rootNode.draw(startX, startY)
+                UIEndFrame()
+            }
         }
     }
 }

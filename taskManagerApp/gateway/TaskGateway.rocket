@@ -17,15 +17,29 @@ class TaskGateway {
         return ""
     }
 
+    func mockTasks(): Array<Task> {
+        return [
+            Task("1", "Настроить CI/CD пайплайн", "Настроить GitHub Actions для автодеплоя на прод", "todo", "2025-06-01"),
+            Task("2", "Провести код-ревью", "Ревью PR для модуля аутентификации", "todo", "2025-06-03"),
+            Task("3", "Написать unit-тесты", "Покрыть тестами сервис заказов, минимум 80%", "todo", "2025-06-05"),
+            Task("4", "Рефакторинг API", "Вынести логику в сервисный слой, убрать дублирование", "in_progress", "2025-05-28"),
+            Task("5", "Интеграция с платёжным шлюзом", "Подключить Stripe, обработать вебхуки", "in_progress", "2025-05-30"),
+            Task("6", "Обновить документацию", "Добавить Swagger для всех новых эндпоинтов", "resolved", "2025-05-20"),
+            Task("7", "Исправить баг с сессией", "Сессия сбрасывается после 5 минут неактивности", "resolved", "2025-05-22"),
+            Task("8", "Оптимизировать запросы к БД", "Добавить индексы, убрать N+1 в списке задач", "resolved", "2025-05-25")
+        ]
+    }
+
     func fetchTasks(): Array<Task> {
         let res = Http.get(self.baseUrl + "/api/v1/tasks")
         if (res.isOk) {
             let items = Json.parse(res.value)
             return items.map { item in
-                Task("" + item.id, "" + item.title, "" + item.description, "" + item.status)
+                Task("" + item.id, "" + item.title, "" + item.description, "" + item.status, "" + item.created_at)
             }
         }
-        return []
+        //return []
+        return self.mockTasks()
     }
 
     func createTask(title: String, desc: String, status: String): Bool {
@@ -43,5 +57,38 @@ class TaskGateway {
     func deleteTask(id: String): Bool {
         let res = Http.delete(self.baseUrl + "/api/v1/tasks/" + id)
         return res.isOk
+    }
+
+    func tasksJson(tasks: Array<Task>): String {
+        let json = "["
+        tasks.forEach { task in
+            json = json + "{\"id\":\"" + task.id + "\",\"title\":\"" + task.title + "\",\"description\":\"" + task.description + "\",\"status\":\"" + task.status + "\"},"
+        }
+        if (tasks.count > 0) {
+            json = json.dropLast()
+        }
+        return json + "]"
+    }
+
+    func summarizeTasks(tasks: Array<Task>): String {
+        let body = self.tasksJson(tasks)
+        let res = Http.post(self.baseUrl + "/api/summary", body)
+        if (res.isOk) {
+            let data = Json.parse(res.value)
+            let field = data.summary ?? data.response ?? data.raw
+            return "" + field
+        }
+        return "Summary unavailable"
+    }
+
+    func highlightTasks(tasks: Array<Task>): String {
+        let body = self.tasksJson(tasks)
+        let res = Http.post(self.baseUrl + "/api/highlight", body)
+        if (res.isOk) {
+            let data = Json.parse(res.value)
+            let field = data.response ?? data.raw
+            return "" + field
+        }
+        return "Highlights unavailable"
     }
 }

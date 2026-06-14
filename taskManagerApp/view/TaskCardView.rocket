@@ -2,6 +2,38 @@ import "libs/UI"
 import "../model/entity/Task"
 import "../presentation/TaskViewModel"
 
+struct StageBar : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let status: String
+
+    init(status: String) {
+        self.status = status
+        self.width  = 90.0
+        self.height = 10.0
+    }
+
+    func draw(x: Double, y: Double) {
+        let seg2 = self.status == "in_progress" || self.status == "resolved"
+        let seg3 = self.status == "resolved"
+
+        UIDrawRoundedRect(x, y, 10.0, 10.0, 5.0, 0.52, 0.57, 0.67, 1.0)
+
+        if (seg2) { UIDrawRect(x + 12.0, y + 4.0, 24.0, 2.0, 0.23, 0.51, 0.96, 1.0) }
+        if (seg2 == false) { UIDrawRect(x + 12.0, y + 4.0, 24.0, 2.0, 0.87, 0.89, 0.92, 1.0) }
+
+        if (seg2) { UIDrawRoundedRect(x + 38.0, y, 10.0, 10.0, 5.0, 0.23, 0.51, 0.96, 1.0) }
+        if (seg2 == false) { UIDrawRoundedRect(x + 38.0, y, 10.0, 10.0, 5.0, 0.87, 0.89, 0.92, 1.0) }
+
+        if (seg3) { UIDrawRect(x + 50.0, y + 4.0, 24.0, 2.0, 0.06, 0.65, 0.42, 1.0) }
+        if (seg3 == false) { UIDrawRect(x + 50.0, y + 4.0, 24.0, 2.0, 0.87, 0.89, 0.92, 1.0) }
+
+        if (seg3) { UIDrawRoundedRect(x + 76.0, y, 10.0, 10.0, 5.0, 0.06, 0.65, 0.42, 1.0) }
+        if (seg3 == false) { UIDrawRoundedRect(x + 76.0, y, 10.0, 10.0, 5.0, 0.87, 0.89, 0.92, 1.0) }
+    }
+}
+
 struct TaskCardView : View {
     let task: Task
     let vm: TaskViewModel
@@ -13,31 +45,64 @@ struct TaskCardView : View {
         return status
     }
 
-    func statusColor(status: String): Color {
-        if (status == "in_progress") { return Color.blue }
-        if (status == "resolved") { return Color.green }
-        return Color(0.5, 0.5, 0.55)
+    func statusTextColor(status: String): Color {
+        if (status == "in_progress") { return Color(0.1, 0.4, 0.85) }
+        if (status == "resolved") { return Color(0.05, 0.58, 0.35) }
+        return Color(0.42, 0.47, 0.57)
+    }
+
+    func statusBgColor(status: String): Color {
+        if (status == "in_progress") { return Color(0.88, 0.94, 1.0) }
+        if (status == "resolved") { return Color(0.87, 0.97, 0.9) }
+        return Color(0.91, 0.92, 0.95)
+    }
+
+    func datePrefix(s: String): String {
+        let len = s.count
+        if (len <= 10) { return s }
+        let extra = len - 10
+        let result = s
+        let i = 0
+        while (i < extra) {
+            result = result.dropLast()
+            i = i + 1
+        }
+        return result
     }
 
     let view: any View {
         let label = self.statusLabel(self.task.status)
-        let accent = self.statusColor(self.task.status)
-        let btns = [Button("Edit", Color(0.38, 0.38, 0.44)) { self.vm.startEdit(self.task.id) }]
+        let txtColor = self.statusTextColor(self.task.status)
+        let bgColor = self.statusBgColor(self.task.status)
+        let dateStr = self.datePrefix(self.task.createdAt)
+
+        let statusBadge = Text(label, 10.0, txtColor).padding(5.0).background(bgColor, 1.0).cornerRadius(4.0)
+        let idBadge = Text("#" + self.task.id, 10.0, Color(0.55, 0.6, 0.67)).padding(5.0).background(Color(0.91, 0.92, 0.95), 1.0).cornerRadius(4.0)
+
+        let btns = [Button("Edit", Color(0.42, 0.47, 0.57)) { self.vm.startEdit(self.task.id) }]
         if (self.task.status != "resolved") {
             btns.append(Button("Resolve", Color.green) { self.vm.resolveTask(self.task.id) })
         }
         btns.append(Button("Delete", Color.red) { self.vm.deleteTask(self.task.id) })
 
-        return VBox(6.0, HAlign.start) {
+        return VBox(7.0, HAlign.start) {
             return [
-                Text(self.task.title, 13.0, Color.white),
-                Text(self.task.description, 11.0, Color(0.55, 0.55, 0.62)),
-                Text(label, 11.0, accent),
+                Text(self.task.title, 13.0, Color(0.07, 0.08, 0.12)),
+                Text(self.task.description, 11.0, Color(0.42, 0.47, 0.57)),
                 HBox(6.0, VAlign.center) {
-                    return btns
+                    return [statusBadge, idBadge]
+                },
+                StageBar(self.task.status),
+                HBox(8.0, VAlign.center) {
+                    return [
+                        Text(dateStr, 10.0, Color(0.55, 0.6, 0.67)),
+                        HBox(6.0, VAlign.center) {
+                            return btns
+                        }
+                    ]
                 }
             ]
-        }.padding(10.0).background(Color(0.2, 0.2, 0.24), 1.0).cornerRadius(6.0)
+        }.padding(12.0).background(Color.white, 1.0).cornerRadius(8.0)
     }
 
     init(task: Task, vm: TaskViewModel) {

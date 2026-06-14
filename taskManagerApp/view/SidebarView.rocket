@@ -5,51 +5,85 @@ import "../presentation/TaskViewModel"
 struct SidebarView : View {
     let vm: TaskViewModel
 
+    func tokenStatus(): String {
+        if (self.vm.viewState.token == "") {
+            return "No token"
+        }
+        return "Token set"
+    }
+
+    func tokenStatusColor(): Color {
+        if (self.vm.viewState.token == "") {
+            return Color.red
+        }
+        return Color.green
+    }
+
     func tokenSection(): any View {
         return VBox(8.0, HAlign.start) {
             return [
-                Text("API Token", 12.0, Color(0.55, 0.55, 0.62)),
-                TextField("tokenField", self.vm.viewState.token, 320.0) {
+                HBox(8.0, VAlign.center) {
+                    return [
+                        Text("JWT Token", 13.0, Color(0.07, 0.08, 0.12)),
+                        Text(self.tokenStatus(), 10.0, self.tokenStatusColor())
+                            .padding(4.0)
+                            .background(Color(0.93, 0.94, 0.96), 1.0)
+                            .cornerRadius(4.0)
+                    ]
+                },
+                TextField("tokenField", self.vm.viewState.token, 250.0) {
                     self.vm.viewState.token = it
                 },
                 HBox(8.0, VAlign.center) {
                     return [
-                        Button("Demo Token", Color.purple) { self.vm.getDemoToken() },
-                        Button("Refresh", Color.blue) { self.vm.refresh() }
+                        Button("Demo Token", Color.blue) {
+                            self.vm.getDemoToken()
+                        },
+                        Button("Clear", Color(0.38, 0.42, 0.52)) {
+                            UITextBufSet("tokenField", "")
+                            UITextBufSetLastSeen("tokenField", "")
+                            self.vm.viewState.token = ""
+                            self.vm.viewState.activity = "Token cleared"
+                        }
                     ]
                 }
             ]
-        }.padding(12.0).background(Color(0.14, 0.14, 0.17), 1.0).cornerRadius(8.0)
+        }.padding(16.0).background(Color.white, 1.0).cornerRadius(8.0)
     }
 
     func aiSection(): any View {
-        return VBox(8.0, HAlign.start) {
+        return VBox(6.0, HAlign.start) {
             return [
-                Text("AI Actions", 13.0, Color.white),
+                Text("AI Analysis", 11.0, Color(0.42, 0.47, 0.57)),
                 HBox(8.0, VAlign.center) {
                     return [
-                        Button("Summarize", Color.teal) { self.vm.refresh() },
-                        Button("Highlight", Color.purple) { self.vm.refresh() }
+                        Button("Summarize", Color.blue) { self.vm.summarize() },
+                        Button("Highlight", Color(0.38, 0.42, 0.52)) { self.vm.highlight() }
                     ]
-                },
-                Text(self.vm.viewState.summary, 11.0, Color(0.55, 0.55, 0.65)),
-                Text(self.vm.viewState.highlights, 11.0, Color(0.55, 0.55, 0.65))
+                }
             ]
-        }.padding(12.0).background(Color(0.14, 0.14, 0.17), 1.0).cornerRadius(8.0)
+        }
+        .padding(12.0)
+        .background(Color.white, 1.0)
+        .cornerRadius(8.0)
     }
 
     func activitySection(): any View {
-        return VBox(4.0, HAlign.start) {
+        return VBox(6.0, HAlign.start) {
             return [
-                Text("Activity", 11.0, Color(0.45, 0.45, 0.52)),
-                Text(self.vm.viewState.activity, 12.0, Color.green)
+                Text("Activity", 11.0, Color(0.42, 0.47, 0.57)),
+                Text(self.vm.viewState.activity, 11.0, Color(0.07, 0.08, 0.12))
             ]
-        }.padding(10.0).background(Color(0.12, 0.12, 0.15), 1.0).cornerRadius(6.0)
+        }
+        .padding(12.0)
+        .background(Color.white, 1.0)
+        .cornerRadius(8.0)
     }
 
     let view: any View {
         return VBox(12.0, HAlign.start) {
             return [
+                Text("Create task", 15.0, Color(0.07, 0.08, 0.12)),
                 self.tokenSection(),
                 FormSectionView(self.vm),
                 self.aiSection(),

@@ -52,15 +52,22 @@ class TaskViewModel {
     }
 
     func deleteTask(id: String) {
-        self.model.deleteTask(id)
-        self.refresh()
+        self.viewState.tasks = self.viewState.tasks.filter { t in t.id != id }
         self.viewState.activity = "Task deleted"
+        self.model.deleteTask(id)
     }
 
     func resolveTask(id: String) {
-        self.model.resolveTask(id, self.viewState.tasks)
-        self.refresh()
+        let updated = []
+        self.viewState.tasks.forEach { task in
+            if (task.id == id) {
+                task.status = "resolved"
+            }
+            updated.append(task)
+        }
+        self.viewState.tasks = updated
         self.viewState.activity = "Task resolved"
+        self.model.resolveTask(id, self.viewState.tasks)
     }
 
     func startEdit(id: String) {
@@ -81,5 +88,31 @@ class TaskViewModel {
         self.viewState.formStatus = "todo"
         self.viewState.editingId = ""
         self.viewState.activity = "Form reset"
+    }
+
+    func truncate60(s: String): String {
+        if (s.count <= 60) { return s }
+        let result = s
+        let excess = s.count - 60
+        let i = 0
+        while (i < excess) {
+            result = result.dropLast()
+            i = i + 1
+        }
+        return result + "..."
+    }
+
+    func summarize() {
+        self.viewState.activity = "Requesting summary..."
+        let text = self.model.summarizeTasks(self.viewState.tasks)
+        self.viewState.summary = text
+        self.viewState.activity = self.truncate60(text)
+    }
+
+    func highlight() {
+        self.viewState.activity = "Requesting highlights..."
+        let text = self.model.highlightTasks(self.viewState.tasks)
+        self.viewState.highlights = text
+        self.viewState.activity = self.truncate60(text)
     }
 }

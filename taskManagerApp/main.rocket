@@ -1,6 +1,6 @@
 import "./view/TaskManagerView"
 
 let app = App()
-app.run("Task Manager", 1100, 720) {
+app.run("Task Manager", 1400, 840) { // 2560 1664 // 1650 1080
     return TaskManagerView()
 }

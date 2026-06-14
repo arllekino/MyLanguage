@@ -10,10 +10,10 @@ struct StatCardView : View {
     let view: any View {
         return VBox(4.0, HAlign.start) {
             return [
-                Text("" + self.cnt, 22.0, self.accent),
-                Text(self.label, 11.0, Color(0.55, 0.55, 0.6))
+                Text("" + self.cnt, 26.0, self.accent),
+                Text(self.label, 11.0, Color(0.42, 0.47, 0.57))
             ]
-        }.padding(12.0).background(Color(0.16, 0.16, 0.19), 1.0).cornerRadius(8.0)
+        }.padding(16.0).background(Color.white, 1.0).cornerRadius(8.0)
     }
 
     init(label: String, cnt: Int, accent: Color) {
@@ -32,21 +32,27 @@ struct PipelineBoardView : View {
         let done = self.vm.resolvedTasks()
         let total = self.vm.viewState.tasks.count
 
-        return VBox(12.0, HAlign.start) {
+        return VBox(14.0, HAlign.start) {
             return [
-                HBox(12.0, VAlign.top) {
+                HBox(10.0, VAlign.top) {
                     return [
-                        StatCardView("Todo", todo.count, Color(0.5, 0.5, 0.58)),
+                        StatCardView("Todo", todo.count, Color(0.42, 0.47, 0.57)),
                         StatCardView("In Progress", inProg.count, Color.blue),
                         StatCardView("Resolved", done.count, Color.green),
-                        StatCardView("Total", total, Color.purple)
+                        StatCardView("Total", total, Color(0.55, 0.28, 0.88))
                     ]
                 },
-                HBox(12.0, VAlign.top) {
+                VBox(3.0, HAlign.start) {
                     return [
-                        KanbanColumnView("Todo", todo, self.vm),
-                        KanbanColumnView("In Progress", inProg, self.vm),
-                        KanbanColumnView("Resolved", done, self.vm)
+                        Text("Pipeline", 14.0, Color(0.07, 0.08, 0.12)),
+                        Text("Cards move left to right as status changes.", 11.0, Color(0.42, 0.47, 0.57))
+                    ]
+                },
+                HBox(10.0, VAlign.top) {
+                    return [
+                        KanbanColumnView("todo", todo, self.vm),
+                        KanbanColumnView("in_progress", inProg, self.vm),
+                        KanbanColumnView("resolved", done, self.vm)
                     ]
                 }
             ]

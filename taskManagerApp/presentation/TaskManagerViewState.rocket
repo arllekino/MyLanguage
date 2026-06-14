@@ -2,10 +2,10 @@ import "../model/entity/Task"
 
 class TaskManagerViewState {
     trackable let tasks: Array<Task> = []
-    trackable let formTitle: String = ""
-    trackable let formDesc: String = ""
+    let formTitle: String = ""
+    let formDesc: String = ""
     trackable let formStatus: String = "todo"
-    trackable let token: String = ""
+    let token: String = ""
     trackable let summary: String = ""
     trackable let highlights: String = ""
     trackable let editingId: String = ""
