@@ -1,0 +1,59 @@
+import "libs/UI"
+import "./KanbanColumnView"
+import "../presentation/TaskViewModel"
+
+struct StatCardView : View {
+    let label: String
+    let cnt: Int
+    let accent: Color
+
+    let view: any View {
+        return VBox(4.0, HAlign.start) {
+            return [
+                Text("" + self.cnt, 22.0, self.accent),
+                Text(self.label, 11.0, Color(0.55, 0.55, 0.6))
+            ]
+        }.padding(12.0).background(Color(0.16, 0.16, 0.19), 1.0).cornerRadius(8.0)
+    }
+
+    init(label: String, cnt: Int, accent: Color) {
+        self.label = label
+        self.cnt = cnt
+        self.accent = accent
+    }
+}
+
+struct PipelineBoardView : View {
+    let vm: TaskViewModel
+
+    let view: any View {
+        let todo = self.vm.todoTasks()
+        let inProg = self.vm.inProgressTasks()
+        let done = self.vm.resolvedTasks()
+        let total = self.vm.viewState.tasks.count
+
+        return VBox(12.0, HAlign.start) {
+            return [
+                HBox(12.0, VAlign.top) {
+                    return [
+                        StatCardView("Todo", todo.count, Color(0.5, 0.5, 0.58)),
+                        StatCardView("In Progress", inProg.count, Color.blue),
+                        StatCardView("Resolved", done.count, Color.green),
+                        StatCardView("Total", total, Color.purple)
+                    ]
+                },
+                HBox(12.0, VAlign.top) {
+                    return [
+                        KanbanColumnView("Todo", todo, self.vm),
+                        KanbanColumnView("In Progress", inProg, self.vm),
+                        KanbanColumnView("Resolved", done, self.vm)
+                    ]
+                }
+            ]
+        }
+    }
+
+    init(vm: TaskViewModel) {
+        self.vm = vm
+    }
+}

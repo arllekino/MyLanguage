@@ -30,6 +30,7 @@ public:
 private:
     std::vector<Token> m_tokens;
     int m_current = 0;
+    bool m_allowTrailingClosure = true;
 
     [[nodiscard]] Token Peek() const
     {
@@ -102,6 +103,10 @@ private:
         if (MatchKeyword("import"))
         {
             return ParseImport();
+        }
+        if (MatchKeyword("enum"))
+        {
+            return ParseEnumDeclaration();
         }
         if (MatchKeyword("interface"))
         {
@@ -242,7 +247,7 @@ private:
             else if (MatchKeyword("trackable") || MatchKeyword("tracked"))
             {
                 bool isTrackable = Previous().value == "trackable";
-                MatchKeyword("let"); // consume the 'let' after trackable/tracked
+                MatchKeyword("let");
                 auto varNode = ParseVarDeclaration(false);
                 auto* varDecl = dynamic_cast<VarDeclStmt*>(varNode.get());
                 varDecl->accessLevel = accessLevel;
@@ -596,6 +601,12 @@ private:
     std::unique_ptr<Stmt> ParseForStatement()
     {
         Token startToken = Previous();
+
+        if (Check(TokenType::IDENTIFIER))
+        {
+            return ParseForInStatement(startToken);
+        }
+
         Consume(TokenType::SEPARATOR, "Expected '(' after 'for'");
 
         std::unique_ptr<Stmt> initializer = nullptr;
@@ -887,7 +898,7 @@ private:
                 callExpr->column = opToken.column;
                 expr = std::move(callExpr);
             }
-            else if (Check(TokenType::SEPARATOR) && Peek().value == "{")
+            else if (m_allowTrailingClosure && Check(TokenType::SEPARATOR) && Peek().value == "{")
             {
                 auto lambda = ParseShortLambdaExpression();
 
@@ -1019,10 +1030,16 @@ private:
             std::vector<std::unique_ptr<Expr>> elements;
             if (!Check(TokenType::SEPARATOR) || Peek().value != "]")
             {
-                do { elements.push_back(ParseExpression()); }
+                do
+                {
+                    elements.push_back(ParseExpression());
+                }
                 while (MatchValue(TokenType::SEPARATOR, ","));
             }
-            if (!MatchValue(TokenType::SEPARATOR, "]")) throw std::runtime_error("Expected ']' after array elements");
+            if (!MatchValue(TokenType::SEPARATOR, "]"))
+            {
+                throw std::runtime_error("Expected ']' after array elements");
+            }
             expr = std::make_unique<ArrayExpr>(std::move(elements));
         }
         else
@@ -1050,12 +1067,15 @@ private:
             std::string funcType = "(";
             if (!Check(TokenType::SEPARATOR) || Peek().value != ")")
             {
-                do {
+                do
+                {
                     funcType += ParseType();
-                    if (Check(TokenType::SEPARATOR) && Peek().value == ",") {
+                    if (Check(TokenType::SEPARATOR) && Peek().value == ",")
+                    {
                         funcType += ", ";
                     }
-                } while (MatchValue(TokenType::SEPARATOR, ","));
+                }
+                while (MatchValue(TokenType::SEPARATOR, ","));
             }
             Consume(TokenType::SEPARATOR, "Expected ')' after function types");
             funcType += ")";
@@ -1148,8 +1168,15 @@ private:
         auto body = std::make_unique<BlockStmt>();
         while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
         {
-            if (IsAtEnd()) throw std::runtime_error("Expected '}' after lambda body");
-            if (Peek().type == TokenType::COMMENT) { Advance(); continue; }
+            if (IsAtEnd())
+            {
+                throw std::runtime_error("Expected '}' after lambda body");
+            }
+            if (Peek().type == TokenType::COMMENT)
+            {
+                Advance();
+                continue;
+            }
             body->statements.push_back(ParseDeclaration());
         }
         Consume(TokenType::SEPARATOR, "Expected '}' after lambda body");
@@ -1169,6 +1196,29 @@ private:
         return closure;
     }
 
+    bool CheckNamedClosureParams() const
+    {
+        int pos = m_current;
+        if (pos >= static_cast<int>(m_tokens.size()) || m_tokens[pos].type != TokenType::IDENTIFIER) {
+            return false;
+        }
+        pos++;
+        while (pos < static_cast<int>(m_tokens.size())
+            && m_tokens[pos].type == TokenType::SEPARATOR
+            && m_tokens[pos].value == ",")
+        {
+            pos++;
+            if (pos >= static_cast<int>(m_tokens.size()) || m_tokens[pos].type != TokenType::IDENTIFIER)
+            {
+                return false;
+            }
+            pos++;
+        }
+        return pos < static_cast<int>(m_tokens.size())
+            && m_tokens[pos].type == TokenType::KEYWORD
+            && m_tokens[pos].value == "in";
+    }
+
     std::unique_ptr<Expr> ParseShortLambdaExpression()
     {
         Token startToken = Consume(TokenType::SEPARATOR, "Expected '{' for closure");
@@ -1177,13 +1227,39 @@ private:
         closure->column = startToken.column;
         closure->returnType = "Any";
 
-        closure->parameters.push_back({"it", "Any"});
+        if (CheckNamedClosureParams())
+        {
+            while (true)
+            {
+                std::string paramName = Consume(TokenType::IDENTIFIER, "Expected parameter name").value;
+                closure->parameters.push_back({paramName, "Any"});
+                if (!MatchValue(TokenType::SEPARATOR, ","))
+                {
+                    break;
+                }
+            }
+            if (!MatchKeyword("in"))
+            {
+                throw std::runtime_error("Expected 'in' after closure parameter list");
+            }
+        }
+        else
+        {
+            closure->parameters.push_back({"it", "Any"});
+        }
 
         auto body = std::make_unique<BlockStmt>();
         while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
         {
-            if (IsAtEnd()) throw std::runtime_error("Expected '}' after closure body");
-            if (Peek().type == TokenType::COMMENT) { Advance(); continue; }
+            if (IsAtEnd())
+            {
+                throw std::runtime_error("Expected '}' after closure body");
+            }
+            if (Peek().type == TokenType::COMMENT)
+            {
+                Advance();
+                continue;
+            }
             body->statements.push_back(ParseDeclaration());
         }
         Consume(TokenType::SEPARATOR, "Expected '}' after closure body");
@@ -1228,9 +1304,72 @@ private:
         return false;
     }
 
+    std::unique_ptr<Stmt> ParseForInStatement(Token startToken)
+    {
+        std::string varName = Consume(TokenType::IDENTIFIER, "Expected variable name in for-in").value;
+        if (!MatchKeyword("in"))
+        {
+            throw std::runtime_error("Expected 'in' after variable name in for-in loop");
+        }
+        m_allowTrailingClosure = false;
+        auto iterable = ParseExpression();
+        m_allowTrailingClosure = true;
+        if (!MatchValue(TokenType::SEPARATOR, "{"))
+        {
+            throw std::runtime_error("Expected '{' before for-in body");
+        }
+        auto body = ParseBlock();
+
+        auto stmt = std::make_unique<ForInStmt>();
+        stmt->line = startToken.line;
+        stmt->column = startToken.column;
+        stmt->varName = varName;
+        stmt->iterable = std::move(iterable);
+        stmt->body = std::move(body);
+        return stmt;
+    }
+
+    std::unique_ptr<Stmt> ParseEnumDeclaration()
+    {
+        Token startToken = Previous();
+        std::string enumName = Consume(TokenType::IDENTIFIER, "Expected enum name").value;
+        Consume(TokenType::SEPARATOR, "Expected '{' before enum body");
+
+        auto enumDecl = std::make_unique<EnumDeclStmt>();
+        enumDecl->line = startToken.line;
+        enumDecl->column = startToken.column;
+        enumDecl->name = enumName;
+
+        while (!Check(TokenType::SEPARATOR) || Peek().value != "}")
+        {
+            if (IsAtEnd())
+            {
+                throw std::runtime_error("Expected '}' after enum body");
+            }
+            if (Peek().type == TokenType::COMMENT)
+            {
+                Advance();
+                continue;
+            }
+
+            if (!MatchKeyword("case"))
+            {
+                throw std::runtime_error("Expected 'case' in enum body, got '" + Peek().value + "'");
+            }
+
+            std::string caseName = Consume(TokenType::IDENTIFIER, "Expected case name").value;
+            enumDecl->cases.push_back(caseName);
+
+            MatchValue(TokenType::SEPARATOR, ",");
+        }
+        Consume(TokenType::SEPARATOR, "Expected '}' after enum body");
+
+        return enumDecl;
+    }
+
     std::unique_ptr<Stmt> ParseImport()
     {
-        Token moduleToken = Consume(TokenType::IDENTIFIER, "Expected module name after 'import'.");
-        return std::make_unique<ImportStmt>(moduleToken.value);
+        Token pathToken = Consume(TokenType::STRING, "Expected quoted path after 'import', e.g. import \"libs/UI\"");
+        return std::make_unique<ImportStmt>(pathToken.value);
     }
 };

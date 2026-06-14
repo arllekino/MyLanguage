@@ -80,7 +80,7 @@ public:
         m_draws.push_back({x, y, text, fontSize, color});
     }
 
-    void EndFrame(const glm::mat4& projection) {
+    void FlushBatch(const glm::mat4& projection) {
         if (m_draws.empty()) return;
 
         glUseProgram(m_shader);
@@ -102,7 +102,12 @@ public:
             glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_verts.size()));
         }
 
+        m_draws.clear();
         glBindVertexArray(0);
+    }
+
+    void EndFrame(const glm::mat4& projection) {
+        FlushBatch(projection);
     }
 
     ~TextRenderer() {

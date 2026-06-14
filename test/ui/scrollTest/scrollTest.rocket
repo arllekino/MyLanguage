@@ -1,0 +1,66 @@
+import "libs/UI"
+
+struct Item {
+    let label: String
+    let color: Color
+}
+
+class VM {
+    trackable let items = [
+        Item("Task 1 - Fix critical bug",     Color.red),
+        Item("Task 2 - Write unit tests",     Color.blue),
+        Item("Task 3 - Update documentation", Color.teal),
+        Item("Task 4 - Code review",          Color.purple),
+        Item("Task 5 - Deploy to staging",    Color.orange),
+        Item("Task 6 - Performance profiling", Color.green),
+        Item("Task 7 - Refactor auth module", Color.red),
+        Item("Task 8 - Design review",        Color.blue),
+        Item("Task 9 - Fix flaky tests",      Color.teal),
+        Item("Task 10 - Ship it",             Color.orange)
+    ]
+    trackable let scrollY: Double = 0.0
+
+    func onScroll(delta: Double) {
+        let next = self.scrollY - delta * 24.0
+        if (next < 0.0) {
+            self.scrollY = 0.0
+        }
+        if (next >= 0.0) {
+            self.scrollY = next
+        }
+    }
+}
+
+struct MyApp : View {
+    tracked let vm: VM = VM()
+
+    let view: any View {
+        let delta = UIGetScrollDelta()
+        if (delta != 0.0) {
+            self.vm.onScroll(delta)
+        }
+
+        let list = VBox(6.0, HAlign.start) {
+            return self.vm.items.map { item in
+                HBox(12.0, VAlign.center) {
+                    return [
+                        Rect(8.0, 8.0, item.color),
+                        Text(item.label, 16.0, Color.white)
+                    ]
+                }
+                .padding(10.0)
+                .background(Color.dark, 1.0)
+                .cornerRadius(8.0)
+            }
+        }
+
+        return ScrollView(500.0, 360.0, self.vm.scrollY, list)
+            .background(Color(0.1, 0.1, 0.12), 1.0)
+            .cornerRadius(12.0)
+    }
+}
+
+let app = App()
+app.run("Scroll Test", 800, 600) {
+    return MyApp()
+}

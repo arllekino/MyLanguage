@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
             auto ast = parser.Parse();
 
             Compiler compiler;
-            FunctionPtr compiledFunc = compiler.Compile(ast);
+            FunctionPtr compiledFunc = compiler.Compile(ast, filename);
 
             std::string bcFilename = filename.substr(0, filename.find_last_of('.')) + ".bc";
             ByteCodeExporter exporter;
@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
     }
     catch (const std::exception &e)
     {
-        std::cerr << e.what() << std::endl;
+        std::cerr << "\033[1;31mError:\033[0m " << e.what() << std::endl;
         return 1;
     }
 

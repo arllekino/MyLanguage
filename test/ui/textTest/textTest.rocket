@@ -1,8 +1,8 @@
-import UI
+import "libs/UI"
 
 struct MyView: View {
     let view: any View {
-        return VBox(16.0) {
+        return VBox(16.0, HAlign.center) {
             return [
                 Text("Hello, Rocket UI!", 24.0, Color.white)
             ]
@@ -12,6 +12,6 @@ struct MyView: View {
 
 let app = App()
 
-app.run("Text Test") {
+app.run("Text Test", 800, 600) {
     return MyView()
 }

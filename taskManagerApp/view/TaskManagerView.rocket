@@ -1,0 +1,23 @@
+import "libs/UI"
+import "./PipelineBoardView"
+import "./SidebarView"
+import "../presentation/TaskViewModel"
+
+struct TaskManagerView : View {
+    tracked let vm: TaskViewModel = TaskViewModel()
+
+    let view: any View {
+        self.vm.ensureLoaded()
+        return VBox(16.0, HAlign.start) {
+            return [
+                Text("Pipeline Board", 20.0, Color.white),
+                HBox(16.0, VAlign.top) {
+                    return [
+                        PipelineBoardView(self.vm),
+                        SidebarView(self.vm)
+                    ]
+                }
+            ]
+        }.padding(24.0)
+    }
+}

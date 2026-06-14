@@ -1,0 +1,35 @@
+import "libs/UI"
+
+let app = App()
+app.run("Card & Modifier Test", 900, 600) {
+    HBox(24.0, VAlign.center) {
+        [
+            VBox(8.0, HAlign.start) {
+                [
+                    Text("Fix critical bug", 18.0, Color.white),
+                    Text("Priority: high",   14.0, Color.gray),
+                    HBox(8.0, VAlign.center) {
+                        [
+                            Button("Resolve", Color.green) { },
+                            Button("Delete",  Color.red)   { }
+                        ]
+                    }
+                ]
+            }
+            .padding(16.0)
+            .background(Color.dark, 1.0)
+            .cornerRadius(10.0),
+
+            VBox(8.0, HAlign.end) {
+                [
+                    Text("Write tests", 18.0, Color.white),
+                    Text("Priority: low", 14.0, Color.gray),
+                    Button("Done", Color.teal) { }
+                ]
+            }
+            .padding(16.0)
+            .background(Color.dark, 1.0)
+            .cornerRadius(10.0)
+        ]
+    }
+}

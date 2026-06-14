@@ -84,6 +84,21 @@ target_link_libraries(MyLanguage
 
 target_include_directories(MyLanguage PRIVATE vendor)
 
+# Copy libs/ and test/ to the build directory so the binary can find them
+# when launched from the build dir (e.g. ./MyLanguage test/ui/...)
+add_custom_command(TARGET MyLanguage POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/libs"
+        "$<TARGET_FILE_DIR:MyLanguage>/libs"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/test"
+        "$<TARGET_FILE_DIR:MyLanguage>/test"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/taskManagerApp"
+        "$<TARGET_FILE_DIR:MyLanguage>/taskManagerApp"
+    COMMENT "Syncing libs/, test/, and taskManagerApp/ to build directory"
+)
+
 add_executable(MyLanguageTest test/test.cpp)
 
 target_link_libraries(MyLanguageTest PRIVATE Catch2::Catch2WithMain)

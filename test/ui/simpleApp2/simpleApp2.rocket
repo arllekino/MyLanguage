@@ -1,4 +1,4 @@
-import UI
+import "libs/UI"
 
 class ViewModel {
     trackable let state: String = ""
@@ -12,7 +12,7 @@ struct MyApp: View {
     tracked let vm: ViewModel = ViewModel()
 
     let view: any View {
-        return VBox(20.0) {
+        return VBox(20.0, HAlign.center) {
             return [
                 Text(self.vm.state, 24.0, Color.white),
                 Button("Clear", Color.red) {
@@ -25,6 +25,6 @@ struct MyApp: View {
 
 let app = App()
 
-app.run("Rocket SwiftUI") {
+app.run("Rocket SwiftUI", 800, 600) {
     return MyApp()
 }

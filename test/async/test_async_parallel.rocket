@@ -1,4 +1,4 @@
-import Net
+import "libs/Net"
 
 async func fetchAndPrint(url: String, label: String) {
     let res = Http.get(url)

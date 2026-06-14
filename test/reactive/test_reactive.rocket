@@ -1,4 +1,4 @@
-import Net
+import "libs/Net"
 
 // AppState с trackable полями
 class AppState {

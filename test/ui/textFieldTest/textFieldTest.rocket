@@ -1,4 +1,4 @@
-import UI
+import "libs/UI"
 
 class FormViewModel {
     let inputText: String
@@ -16,7 +16,7 @@ struct FormView: View {
     let vm: FormViewModel
 
     let view: any View {
-        return VBox(16.0) {
+        return VBox(16.0, HAlign.center) {
             return [
                 Text("Type something:", 20.0, Color.white),
                 TextField("inputField", self.vm.inputText, 300.0) {
@@ -35,6 +35,6 @@ struct FormView: View {
 let vm = FormViewModel()
 let app = App()
 
-app.run("TextField Test") {
+app.run("TextField Test", 800, 600) {
     return FormView(vm)
 }

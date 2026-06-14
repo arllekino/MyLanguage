@@ -1,4 +1,4 @@
-import Net
+import "libs/Net"
 
 // GET public JSON API
 let res = Http.get("https://jsonplaceholder.typicode.com/todos/1")

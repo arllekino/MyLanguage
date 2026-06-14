@@ -1,0 +1,22 @@
+let s = "Hello, Rocket World!"
+
+print(s.contains("Rocket"))
+print(s.contains("Python"))
+
+print(s.startsWith("Hello"))
+print(s.endsWith("World!"))
+
+print(s.toUpperCase())
+print(s.toLowerCase())
+
+print(s.replace("Rocket", "Swift"))
+
+let parts = s.split(", ")
+for part in parts {
+    print(part)
+}
+
+let padded = "  trim me  "
+print(padded.trim())
+
+print(s.substring(7, 13))

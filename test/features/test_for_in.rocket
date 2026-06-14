@@ -1,0 +1,18 @@
+// for-in loop
+let numbers = [10, 20, 30, 40, 50]
+
+for n in numbers {
+    print(n)
+}
+
+// for-in with strings
+let words = ["hello", "rocket", "world"]
+for word in words {
+    print(word)
+}
+
+// for-in with map/filter
+let evens = numbers.filter { it > 15 }
+for e in evens {
+    print(e)
+}

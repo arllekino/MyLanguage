@@ -1,0 +1,26 @@
+let nums = [3, 1, 4, 1, 5, 9, 2, 6]
+
+print(nums.first)
+print(nums.last)
+print(nums.isEmpty)
+print(nums.count)
+
+let sorted = nums.sorted()
+for n in sorted {
+    print(n)
+}
+
+let reversed = nums.reversed()
+print(reversed.first)
+
+nums.append(42)
+print(nums.last)
+
+print(nums.contains(9))
+print(nums.contains(99))
+
+let words = ["hello", "world", "rocket"]
+print(words.joined(", "))
+
+let sum = nums.reduce(0) { it + it }
+print(sum)

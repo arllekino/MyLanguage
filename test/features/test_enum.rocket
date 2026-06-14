@@ -1,0 +1,19 @@
+enum TaskStatus {
+    case todo
+    case inProgress
+    case done
+}
+
+let s = TaskStatus.todo
+print(s)
+
+let s2 = TaskStatus.done
+print(s2)
+
+if (s == TaskStatus.todo) {
+    print("status is todo")
+}
+
+if (s2 == TaskStatus.done) {
+    print("status is done")
+}

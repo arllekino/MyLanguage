@@ -1,0 +1,6 @@
+import "./view/TaskManagerView"
+
+let app = App()
+app.run("Task Manager", 1100, 720) {
+    return TaskManagerView()
+}

@@ -6,6 +6,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <cmath>
+#include <algorithm>
 
 #include "./Utils/Shader/Program.h"
 #include "./Utils/TextRenderer.h"
@@ -52,6 +54,8 @@ public:
     float mouseX = 0, mouseY = 0;
     bool  mouseDown = false;
     bool  mouseDownPrev = false;
+
+    float scrollDeltaY = 0.0f;
 
     std::string pendingText;
     bool backspacePressed = false;
@@ -101,6 +105,11 @@ public:
             }
         });
 
+        glfwSetScrollCallback(window, [](GLFWwindow* w, double /*dx*/, double dy) {
+            auto* r = static_cast<UIRenderer*>(glfwGetWindowUserPointer(w));
+            r->scrollDeltaY += static_cast<float>(dy);
+        });
+
         SetupBuffers();
         InitShaders();
         m_textRenderer.Init();
@@ -130,6 +139,7 @@ public:
         pendingText      = "";
         backspacePressed = false;
         enterPressed     = false;
+        scrollDeltaY     = 0.0f;
 
         glfwPollEvents();
 
@@ -155,6 +165,36 @@ public:
         vertices.push_back({{x,     y + h}, color});
     }
 
+    void DrawRoundedRect(float x, float y, float w, float h, float radius, glm::vec4 color)
+    {
+        if (radius <= 0.0f) { DrawRect(x, y, w, h, color); return; }
+        float r = std::min(radius, std::min(w * 0.5f, h * 0.5f));
+
+        DrawRect(x + r, y, w - 2.0f * r, h, color);
+        DrawRect(x, y + r, r, h - 2.0f * r, color);
+        DrawRect(x + w - r, y + r, r, h - 2.0f * r, color);
+
+        constexpr int kSegs = 8;
+        struct Corner { float cx, cy, startAngle; };
+        Corner corners[4] = {
+            {x + r,     y + r,     static_cast<float>(M_PI)},
+            {x + w - r, y + r,     static_cast<float>(M_PI * 1.5)},
+            {x + w - r, y + h - r, 0.0f},
+            {x + r,     y + h - r, static_cast<float>(M_PI * 0.5)},
+        };
+        for (const auto& c : corners)
+        {
+            for (int i = 0; i < kSegs; ++i)
+            {
+                float a0 = c.startAngle + static_cast<float>(i)     * static_cast<float>(M_PI * 0.5 / kSegs);
+                float a1 = c.startAngle + static_cast<float>(i + 1) * static_cast<float>(M_PI * 0.5 / kSegs);
+                vertices.push_back({{c.cx,                   c.cy                  }, color});
+                vertices.push_back({{c.cx + r * cosf(a0),   c.cy + r * sinf(a0)   }, color});
+                vertices.push_back({{c.cx + r * cosf(a1),   c.cy + r * sinf(a1)   }, color});
+            }
+        }
+    }
+
     void DrawText(float x, float y, const std::string& text, float fontSize, glm::vec4 color)
     {
         m_textRenderer.DrawText(x, y, text, fontSize, color);
@@ -167,6 +207,44 @@ public:
 
     bool IsMouseJustPressed()  const { return mouseDown && !mouseDownPrev; }
     bool IsMouseJustReleased() const { return !mouseDown && mouseDownPrev; }
+
+    float GetScrollDelta() const { return scrollDeltaY; }
+
+    void FlushBatch()
+    {
+        if (vertices.empty()) return;
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(UIVertex), vertices.data());
+        glBindVertexArray(vao);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertices.size()));
+        vertices.clear();
+    }
+
+    void BeginClip(float x, float y, float w, float h)
+    {
+        FlushBatch();
+        m_textRenderer.FlushBatch(m_projection);
+
+        int fbWidth, fbHeight;
+        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+        float scaleX = static_cast<float>(fbWidth)  / static_cast<float>(m_logicalWidth);
+        float scaleY = static_cast<float>(fbHeight) / static_cast<float>(m_logicalHeight);
+
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(
+            static_cast<int>(x * scaleX),
+            static_cast<int>((m_logicalHeight - y - h) * scaleY),
+            static_cast<int>(w * scaleX),
+            static_cast<int>(h * scaleY)
+        );
+    }
+
+    void EndClip()
+    {
+        FlushBatch();
+        m_textRenderer.FlushBatch(m_projection);
+        glDisable(GL_SCISSOR_TEST);
+    }
 
     void EndFrame()
     {
@@ -202,7 +280,7 @@ private:
         glGenBuffers(1, &vbo);
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, 12000 * sizeof(UIVertex), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, 65536 * sizeof(UIVertex), nullptr, GL_DYNAMIC_DRAW);
 
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex),

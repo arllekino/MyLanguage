@@ -1,0 +1,26 @@
+struct Result {
+    let isOk: Bool
+    let value: Any
+    let error: String
+
+    init(ok: Bool, v: Any, e: String) {
+        self.isOk  = ok
+        self.value = v
+        self.error = e
+    }
+
+    static let ok    = ResultOk
+    static let error = ResultError
+}
+
+struct Http {
+    static let get    = HttpGet
+    static let post   = HttpPost
+    static let put    = HttpPut
+    static let delete = HttpDelete
+}
+
+struct Json {
+    static let parse     = JsonParse
+    static let stringify = JsonStringify
+}

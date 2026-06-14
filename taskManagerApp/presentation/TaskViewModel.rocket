@@ -1,0 +1,85 @@
+import "./TaskManagerViewState"
+import "../model/TaskManagerModel"
+
+class TaskViewModel {
+    let viewState: TaskManagerViewState = TaskManagerViewState()
+    let model: TaskManagerModel = TaskManagerModel()
+
+    func ensureLoaded() {
+        if (self.viewState.initialized == false) {
+            self.viewState.initialized = true
+            self.viewState.tasks = self.model.fetchTasks()
+            self.viewState.activity = "Loaded " + self.viewState.tasks.count + " tasks"
+        }
+    }
+
+    func refresh() {
+        self.viewState.tasks = self.model.fetchTasks()
+        self.viewState.activity = "Loaded " + self.viewState.tasks.count + " tasks"
+    }
+
+    func getDemoToken() {
+        let t = self.model.getDemoToken()
+        self.viewState.token = t
+        self.viewState.activity = "Demo token obtained"
+    }
+
+    func todoTasks(): Array<Task> {
+        return self.model.todoTasks(self.viewState.tasks)
+    }
+
+    func inProgressTasks(): Array<Task> {
+        return self.model.inProgressTasks(self.viewState.tasks)
+    }
+
+    func resolvedTasks(): Array<Task> {
+        return self.model.resolvedTasks(self.viewState.tasks)
+    }
+
+    func save() {
+        if (self.viewState.editingId != "") {
+            self.model.updateTask(self.viewState.editingId, self.viewState.formTitle, self.viewState.formDesc, self.viewState.formStatus)
+            self.viewState.activity = "Task updated"
+        } else {
+            self.model.createTask(self.viewState.formTitle, self.viewState.formDesc, self.viewState.formStatus)
+            self.viewState.activity = "Task created"
+        }
+        self.viewState.editingId = ""
+        self.viewState.formTitle = ""
+        self.viewState.formDesc = ""
+        self.viewState.formStatus = "todo"
+        self.refresh()
+    }
+
+    func deleteTask(id: String) {
+        self.model.deleteTask(id)
+        self.refresh()
+        self.viewState.activity = "Task deleted"
+    }
+
+    func resolveTask(id: String) {
+        self.model.resolveTask(id, self.viewState.tasks)
+        self.refresh()
+        self.viewState.activity = "Task resolved"
+    }
+
+    func startEdit(id: String) {
+        self.viewState.tasks.forEach { task in
+            if (task.id == id) {
+                self.viewState.formTitle = task.title
+                self.viewState.formDesc = task.description
+                self.viewState.formStatus = task.status
+                self.viewState.editingId = id
+            }
+        }
+        self.viewState.activity = "Editing task " + id
+    }
+
+    func reset() {
+        self.viewState.formTitle = ""
+        self.viewState.formDesc = ""
+        self.viewState.formStatus = "todo"
+        self.viewState.editingId = ""
+        self.viewState.activity = "Form reset"
+    }
+}

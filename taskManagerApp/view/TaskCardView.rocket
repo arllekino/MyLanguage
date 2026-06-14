@@ -1,0 +1,47 @@
+import "libs/UI"
+import "../model/entity/Task"
+import "../presentation/TaskViewModel"
+
+struct TaskCardView : View {
+    let task: Task
+    let vm: TaskViewModel
+
+    func statusLabel(status: String): String {
+        if (status == "todo") { return "Todo" }
+        if (status == "in_progress") { return "In Progress" }
+        if (status == "resolved") { return "Resolved" }
+        return status
+    }
+
+    func statusColor(status: String): Color {
+        if (status == "in_progress") { return Color.blue }
+        if (status == "resolved") { return Color.green }
+        return Color(0.5, 0.5, 0.55)
+    }
+
+    let view: any View {
+        let label = self.statusLabel(self.task.status)
+        let accent = self.statusColor(self.task.status)
+        let btns = [Button("Edit", Color(0.38, 0.38, 0.44)) { self.vm.startEdit(self.task.id) }]
+        if (self.task.status != "resolved") {
+            btns.append(Button("Resolve", Color.green) { self.vm.resolveTask(self.task.id) })
+        }
+        btns.append(Button("Delete", Color.red) { self.vm.deleteTask(self.task.id) })
+
+        return VBox(6.0, HAlign.start) {
+            return [
+                Text(self.task.title, 13.0, Color.white),
+                Text(self.task.description, 11.0, Color(0.55, 0.55, 0.62)),
+                Text(label, 11.0, accent),
+                HBox(6.0, VAlign.center) {
+                    return btns
+                }
+            ]
+        }.padding(10.0).background(Color(0.2, 0.2, 0.24), 1.0).cornerRadius(6.0)
+    }
+
+    init(task: Task, vm: TaskViewModel) {
+        self.task = task
+        self.vm = vm
+    }
+}

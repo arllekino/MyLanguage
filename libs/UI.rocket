@@ -1,0 +1,530 @@
+func unwrap(v: Any): Any {
+    let current = v
+    while (current.view() != null) {
+        current = current.view()
+    }
+    return current
+}
+
+interface View {
+    let view: any View
+}
+
+enum HAlign {
+    case start
+    case center
+    case end
+}
+
+enum VAlign {
+    case top
+    case center
+    case bottom
+}
+
+// Color
+
+struct Color {
+    let r: Double
+    let g: Double
+    let b: Double
+
+    init(r: Double, g: Double, b: Double) {
+        self.r = r
+        self.g = g
+        self.b = b
+    }
+
+    static let white  = Color(1.0, 1.0, 1.0)
+    static let black  = Color(0.0, 0.0, 0.0)
+    static let red    = Color(0.85, 0.18, 0.18)
+    static let green  = Color(0.18, 0.72, 0.28)
+    static let blue   = Color(0.22, 0.52, 1.0)
+    static let gray   = Color(0.5, 0.5, 0.5)
+    static let dark   = Color(0.14, 0.14, 0.16)
+    static let orange = Color(1.0, 0.55, 0.1)
+    static let purple = Color(0.6, 0.3, 1.0)
+    static let teal   = Color(0.1, 0.75, 0.65)
+    static let clear  = Color(0.0, 0.0, 0.0)
+}
+
+
+
+
+struct StyledView : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let child: any View
+    let padT: Double
+    let padR: Double
+    let padB: Double
+    let padL: Double
+    let bgR: Double
+    let bgG: Double
+    let bgB: Double
+    let bgA: Double
+    let radius: Double
+
+    init(child: any View, pt: Double, pr: Double, pb: Double, pl: Double, bgR: Double, bgG: Double, bgB: Double, bgA: Double, r: Double) {
+        self.child  = child
+        self.padT   = pt
+        self.padR   = pr
+        self.padB   = pb
+        self.padL   = pl
+        self.bgR    = bgR
+        self.bgG    = bgG
+        self.bgB    = bgB
+        self.bgA    = bgA
+        self.radius = r
+        self.width  = child.width  + pl + pr
+        self.height = child.height + pt + pb
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self.child, amount, amount, amount, amount, self.bgR, self.bgG, self.bgB, self.bgA, self.radius)
+    }
+
+    func background(color: Color, alpha: Double): StyledView {
+        return StyledView(self.child, self.padT, self.padR, self.padB, self.padL, color.r, color.g, color.b, alpha, self.radius)
+    }
+
+    func cornerRadius(r: Double): StyledView {
+        return StyledView(self.child, self.padT, self.padR, self.padB, self.padL, self.bgR, self.bgG, self.bgB, self.bgA, r)
+    }
+
+    func frame(w: Double, h: Double): StyledView {
+        let s = StyledView(self.child, self.padT, self.padR, self.padB, self.padL, self.bgR, self.bgG, self.bgB, self.bgA, self.radius)
+        s.width  = w
+        s.height = h
+        return s
+    }
+
+    func draw(x: Double, y: Double) {
+        if (self.bgA > 0.0) {
+            UIDrawRoundedRect(x, y, self.width, self.height, self.radius, self.bgR, self.bgG, self.bgB, self.bgA)
+        }
+        self.child.draw(x + self.padL, y + self.padT)
+    }
+}
+
+// Rect
+
+struct Rect : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let r: Double
+    let g: Double
+    let b: Double
+
+    init(w: Double, h: Double, color: Color) {
+        self.width = w
+        self.height = h
+        self.r = color.r
+        self.g = color.g
+        self.b = color.b
+    }
+
+    func draw(x: Double, y: Double) {
+        UIDrawRect(x, y, self.width, self.height, self.r, self.g, self.b, 1.0)
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self, amount, amount, amount, amount, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    func background(color: Color, alpha: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, color.r, color.g, color.b, alpha, 0.0)
+    }
+
+    func cornerRadius(r: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, r)
+    }
+
+    func frame(w: Double, h: Double): StyledView {
+        let s = StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        s.width  = w
+        s.height = h
+        return s
+    }
+}
+
+// Text
+
+struct Text : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let content: String
+    let fontSize: Double
+    let r: Double
+    let g: Double
+    let b: Double
+
+    init(text: String, size: Double, color: Color) {
+        self.content  = text
+        self.fontSize = size
+        self.r        = color.r
+        self.g        = color.g
+        self.b        = color.b
+        self.width    = UIMeasureTextWidth(text, size)
+        self.height   = size
+    }
+
+    func draw(x: Double, y: Double) {
+        UIDrawText(x, y, self.content, self.fontSize, self.r, self.g, self.b)
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self, amount, amount, amount, amount, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    func background(color: Color, alpha: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, color.r, color.g, color.b, alpha, 0.0)
+    }
+
+    func cornerRadius(r: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, r)
+    }
+
+    func frame(w: Double, h: Double): StyledView {
+        let s = StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        s.width  = w
+        s.height = h
+        return s
+    }
+}
+
+// Button
+
+struct Button : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let label: String
+    let fontSize: Double
+    let bgR: Double
+    let bgG: Double
+    let bgB: Double
+    let action: (): Any
+
+    init(label: String, color: Color, action: (): Any) {
+        self.label    = label
+        self.fontSize = 16.0
+        self.bgR      = color.r
+        self.bgG      = color.g
+        self.bgB      = color.b
+        self.action   = action
+        let tw        = UIMeasureTextWidth(label, 16.0)
+        self.width    = tw + 32.0
+        self.height   = 40.0
+    }
+
+    func draw(x: Double, y: Double) {
+        UIDrawRoundedRect(x, y, self.width, self.height, 6.0, self.bgR, self.bgG, self.bgB, 1.0)
+        let tw = UIMeasureTextWidth(self.label, self.fontSize)
+        let tx = x + (self.width - tw) / 2.0
+        let ty = y + (self.height - self.fontSize) / 2.0
+        UIDrawText(tx, ty, self.label, self.fontSize, 1.0, 1.0, 1.0)
+        if (UIIsMouseJustPressed()) {
+            let mx = UIGetMouseX()
+            let my = UIGetMouseY()
+            if (mx >= x && mx <= x + self.width && my >= y && my <= y + self.height) {
+                self.action()
+            }
+        }
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self, amount, amount, amount, amount, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    func background(color: Color, alpha: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, color.r, color.g, color.b, alpha, 0.0)
+    }
+
+    func cornerRadius(r: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, r)
+    }
+}
+
+// TextField
+
+struct TextField : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let fontSize: Double
+    let value: String
+    let fieldId: String
+    let onChange: (String): Any
+
+    init(id: String, value: String, w: Double, onChange: (String): Any) {
+        self.fieldId  = id
+        self.value    = value
+        self.width    = w
+        self.fontSize = 16.0
+        self.height   = 40.0
+        self.onChange = onChange
+    }
+
+    func draw(x: Double, y: Double) {
+        let focused = UIIsFocused(self.fieldId)
+
+        if (focused) {
+            UIDrawRoundedRect(x, y, self.width, self.height, 6.0, 0.25, 0.55, 1.0, 1.0)
+        }
+        if (focused == false) {
+            UIDrawRoundedRect(x, y, self.width, self.height, 6.0, 0.4, 0.4, 0.45, 1.0)
+        }
+        UIDrawRoundedRect(x + 2.0, y + 2.0, self.width - 4.0, self.height - 4.0, 5.0, 0.12, 0.12, 0.14, 1.0)
+
+        if (focused) {
+            UIDrawText(x + 8.0, y + (self.height - self.fontSize) / 2.0, self.value + "|", self.fontSize, 1.0, 1.0, 1.0)
+        }
+        if (focused == false) {
+            UIDrawText(x + 8.0, y + (self.height - self.fontSize) / 2.0, self.value, self.fontSize, 0.75, 0.75, 0.78)
+        }
+
+        if (UIIsMouseJustPressed()) {
+            let mx = UIGetMouseX()
+            let my = UIGetMouseY()
+            if (mx >= x && mx <= x + self.width && my >= y && my <= y + self.height) {
+                UISetFocused(self.fieldId)
+            }
+        }
+
+        if (focused) {
+            let typed = UIGetPendingText()
+            if (typed != "") {
+                self.onChange(self.value + typed)
+            }
+            if (UIIsBackspacePressed()) {
+                let len = self.value.count
+                if (len > 0) {
+                    self.onChange(self.value.dropLast())
+                }
+            }
+        }
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self, amount, amount, amount, amount, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    func frame(w: Double, h: Double): StyledView {
+        let s = StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        s.width  = w
+        s.height = h
+        return s
+    }
+}
+
+// VBox
+// align: "start" | "center" | "end"
+
+struct VBox : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let spacing: Double
+    let align: HAlign
+    let children: Array<any View>
+
+    init(space: Double, align: HAlign, content: (): Array<any View>) {
+        self.width    = 0.0
+        self.height   = 0.0
+        self.spacing  = space
+        self.align    = align
+        self.children = content()
+        self.calculateSizes()
+    }
+
+    func calculateSizes() {
+        let totalHeight = 0.0
+        let maxWidth    = 0.0
+        let count       = self.children.count
+        self.children.forEach {
+            let node = unwrap(it)
+            totalHeight = totalHeight + node.height
+            if (node.width > maxWidth) {
+                maxWidth = node.width
+            }
+        }
+        if (count > 1) {
+            totalHeight = totalHeight + self.spacing * (count - 1)
+        }
+        self.width  = maxWidth
+        self.height = totalHeight
+    }
+
+    func alignedX(x: Double, childWidth: Double): Double {
+        if (self.align == HAlign.center) { return x + ((self.width - childWidth) / 2.0) }
+        if (self.align == HAlign.end)    { return x + (self.width - childWidth) }
+        return x
+    }
+
+    func draw(x: Double, y: Double) {
+        let currentY = y
+        self.children.forEach {
+            let node = unwrap(it)
+            node.draw(self.alignedX(x, node.width), currentY)
+            currentY = currentY + node.height + self.spacing
+        }
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self, amount, amount, amount, amount, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    func background(color: Color, alpha: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, color.r, color.g, color.b, alpha, 0.0)
+    }
+
+    func cornerRadius(r: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, r)
+    }
+
+    func frame(w: Double, h: Double): StyledView {
+        let s = StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        s.width  = w
+        s.height = h
+        return s
+    }
+}
+
+// HBox
+// align: "top" | "center" | "bottom"
+
+struct HBox : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let spacing: Double
+    let align: VAlign
+    let children: Array<any View>
+
+    init(space: Double, align: VAlign, content: (): Array<any View>) {
+        self.width    = 0.0
+        self.height   = 0.0
+        self.spacing  = space
+        self.align    = align
+        self.children = content()
+        self.calculateSizes()
+    }
+
+    func calculateSizes() {
+        let totalWidth = 0.0
+        let maxHeight  = 0.0
+        let count      = self.children.count
+        self.children.forEach {
+            let node = unwrap(it)
+            totalWidth = totalWidth + node.width
+            if (node.height > maxHeight) {
+                maxHeight = node.height
+            }
+        }
+        if (count > 1) {
+            totalWidth = totalWidth + self.spacing * (count - 1)
+        }
+        self.width  = totalWidth
+        self.height = maxHeight
+    }
+
+    func alignedY(y: Double, childHeight: Double): Double {
+        if (self.align == VAlign.top)    { return y }
+        if (self.align == VAlign.bottom) { return y + (self.height - childHeight) }
+        return y + ((self.height - childHeight) / 2.0)
+    }
+
+    func draw(x: Double, y: Double) {
+        let currentX = x
+        self.children.forEach {
+            let node = unwrap(it)
+            node.draw(currentX, self.alignedY(y, node.height))
+            currentX = currentX + node.width + self.spacing
+        }
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self, amount, amount, amount, amount, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    func background(color: Color, alpha: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, color.r, color.g, color.b, alpha, 0.0)
+    }
+
+    func cornerRadius(r: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, r)
+    }
+
+    func frame(w: Double, h: Double): StyledView {
+        let s = StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        s.width  = w
+        s.height = h
+        return s
+    }
+}
+
+// ScrollView
+// scrollY — tracked offset, managed by the caller's ViewModel
+
+struct ScrollView : View {
+    let view: any View { return null }
+    let width: Double
+    let height: Double
+    let scrollY: Double
+    let child: any View
+
+    init(w: Double, h: Double, scrollY: Double, child: any View) {
+        self.width   = w
+        self.height  = h
+        self.scrollY = scrollY
+        self.child   = child
+    }
+
+    func draw(x: Double, y: Double) {
+        UIBeginClip(x, y, self.width, self.height)
+        self.child.draw(x, y - self.scrollY)
+        UIEndClip()
+    }
+
+    func padding(amount: Double): StyledView {
+        return StyledView(self, amount, amount, amount, amount, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    func background(color: Color, alpha: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, color.r, color.g, color.b, alpha, 0.0)
+    }
+
+    func cornerRadius(r: Double): StyledView {
+        return StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, r)
+    }
+
+    func frame(w: Double, h: Double): StyledView {
+        let s = StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        s.width  = w
+        s.height = h
+        return s
+    }
+}
+
+// App
+
+class App {
+    func run(title: String, width: Int, height: Int, content: (): any View) {
+        let screenWidth  = width  * 1.0
+        let screenHeight = height * 1.0
+        UIInitWindow(width, height, title)
+        let rootView = content()
+        while (UIShouldClose() == false) {
+            UIBeginFrame(width, height)
+            let rootNode = unwrap(rootView)
+            let startX = (screenWidth  - rootNode.width)  / 2.0
+            let startY = (screenHeight - rootNode.height) / 2.0
+            rootNode.draw(startX, startY)
+            UIEndFrame()
+        }
+    }
+}

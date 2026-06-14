@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <unordered_set>
+#include <filesystem>
 
 #include "../ASTBuilder/AST.h"
 #include "../Utils/TypeInfo.h"
@@ -85,6 +86,20 @@ public:
         m_functions["UIIsFocused"] = { TypeInfo::Simple(TypeKind::Bool), { TypeInfo::Simple(TypeKind::String) } };
         m_functions["UIClearFocus"] = { TypeInfo::Simple(TypeKind::Bool), {} };
         m_functions["UIGetVersion"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
+        m_functions["UIIsDirty"]           = { TypeInfo::Simple(TypeKind::Bool), {} };
+        m_functions["UIGetScrollDelta"]    = { TypeInfo::Simple(TypeKind::Double), {} };
+        m_functions["UIBeginClip"]         = { TypeInfo::Simple(TypeKind::Void), {
+            TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+            TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double)
+        } };
+        m_functions["UIEndClip"]           = { TypeInfo::Simple(TypeKind::Void), {} };
+        m_functions["UIDrawRoundedRect"] = { TypeInfo::Simple(TypeKind::Any), {
+            TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+            TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+            TypeInfo::Simple(TypeKind::Double),
+            TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double),
+            TypeInfo::Simple(TypeKind::Double), TypeInfo::Simple(TypeKind::Double)
+        } };
 
         m_functions["ResultOk"]    = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
         m_functions["ResultError"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
@@ -98,9 +113,41 @@ public:
         m_functions["HttpDelete"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::String) } };
 
         m_functions["Async"] = { TypeInfo::Simple(TypeKind::Any), { TypeInfo::Simple(TypeKind::Any) } };
+
+        m_functions["DateNow"]       = { TypeInfo::Simple(TypeKind::Double), {} };
+        m_functions["DateTimestamp"] = { TypeInfo::Simple(TypeKind::Double), {} };
+        m_functions["DateFormat"]    = { TypeInfo::Simple(TypeKind::String), { TypeInfo::Simple(TypeKind::Any), TypeInfo::Simple(TypeKind::String) } };
+        m_functions["DateYear"]      = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateMonth"]     = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateDay"]       = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateHour"]      = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateMinute"]    = { TypeInfo::Simple(TypeKind::Int), {} };
+        m_functions["DateSecond"]    = { TypeInfo::Simple(TypeKind::Int), {} };
+
+        ClassInfo dateClassInfo;
+        dateClassInfo.name = "Date";
+        dateClassInfo.staticFieldNames.insert("now");
+        dateClassInfo.staticFieldNames.insert("timestamp");
+        dateClassInfo.staticFieldNames.insert("format");
+        dateClassInfo.staticFieldNames.insert("year");
+        dateClassInfo.staticFieldNames.insert("month");
+        dateClassInfo.staticFieldNames.insert("day");
+        dateClassInfo.staticFieldNames.insert("hour");
+        dateClassInfo.staticFieldNames.insert("minute");
+        dateClassInfo.staticFieldNames.insert("second");
+        m_classes["Date"] = dateClassInfo;
+        m_globalVariables["Date"] = { true, TypeInfo::Class("Date") };
     }
-    FunctionPtr Compile(const std::vector<std::unique_ptr<Stmt>>& ast)
+    FunctionPtr Compile(const std::vector<std::unique_ptr<Stmt>>& ast,
+                        const std::string& sourceFile = "")
     {
+        if (!sourceFile.empty())
+        {
+            namespace fs = std::filesystem;
+            m_importDirStack.push_back(
+                fs::weakly_canonical(fs::path(sourceFile)).parent_path().string()
+            );
+        }
         InitState("main", 0, TypeInfo::Simple(TypeKind::Void));
 
         for (const auto& stmt : ast)
@@ -109,7 +156,7 @@ public:
         }
 
         Emit(OP_CONSTANT);
-        Emit(MakeConstant(0));
+        Emit16(MakeConstant(0));
         Emit(OP_RETURN);
 
         return EndState();
@@ -188,6 +235,7 @@ private:
     std::unordered_map<std::string, InterfaceInfo> m_interfaces;
     std::unordered_set<std::string> m_importedModules;
     std::unordered_set<std::string> m_importStack;
+    std::vector<std::string> m_importDirStack;
     
     TypeInfoPtr m_lastExprType = TypeInfo::Simple(TypeKind::Any);
 
@@ -356,10 +404,62 @@ private:
         m_current->function->chunk->code.push_back(byte);
     }
 
-    uint8_t MakeConstant(const Value& value)
+    void Emit16(uint16_t idx)
     {
-        m_current->function->chunk->constants.push_back(value);
-        return static_cast<uint8_t>(m_current->function->chunk->constants.size() - 1);
+        m_current->function->chunk->code.push_back(static_cast<uint8_t>((idx >> 8) & 0xFF));
+        m_current->function->chunk->code.push_back(static_cast<uint8_t>(idx & 0xFF));
+    }
+
+    uint16_t MakeConstant(const Value& value)
+    {
+        auto& constants = m_current->function->chunk->constants;
+        if (std::holds_alternative<StringPtr>(value))
+        {
+            const std::string& s = *std::get<StringPtr>(value);
+            for (size_t i = 0; i < constants.size(); ++i)
+            {
+                if (std::holds_alternative<StringPtr>(constants[i]) &&
+                    *std::get<StringPtr>(constants[i]) == s)
+                {
+                    return static_cast<uint16_t>(i);
+                }
+            }
+        }
+        else if (std::holds_alternative<double>(value))
+        {
+            double d = std::get<double>(value);
+            for (size_t i = 0; i < constants.size(); ++i)
+            {
+                if (std::holds_alternative<double>(constants[i]) && std::get<double>(constants[i]) == d)
+                {
+                    return static_cast<uint8_t>(i);
+                }
+            }
+        }
+        else if (std::holds_alternative<bool>(value))
+        {
+            bool b = std::get<bool>(value);
+            for (size_t i = 0; i < constants.size(); ++i)
+            {
+                if (std::holds_alternative<bool>(constants[i]) && std::get<bool>(constants[i]) == b)
+                {
+                    return static_cast<uint8_t>(i);
+                }
+            }
+        }
+        else if (std::holds_alternative<int64_t>(value))
+        {
+            int64_t n = std::get<int64_t>(value);
+            for (size_t i = 0; i < constants.size(); ++i)
+            {
+                if (std::holds_alternative<int64_t>(constants[i]) && std::get<int64_t>(constants[i]) == n)
+                {
+                    return static_cast<uint8_t>(i);
+                }
+            }
+        }
+        constants.push_back(value);
+        return static_cast<uint16_t>(constants.size() - 1);
     }
 
     void BeginScope()
@@ -429,7 +529,7 @@ private:
         else
         {
             Emit(OP_CONSTANT);
-            Emit(MakeConstant(Null{}));
+            Emit16(MakeConstant(Null{}));
             initType = TypeInfo::Simple(TypeKind::Null);
         }
 
@@ -448,7 +548,7 @@ private:
         if (isGlobalScope())
         {
             Emit(OP_DEFINE_GLOBAL);
-            Emit(MakeConstant(std::make_shared<std::string>(varDecl->name)));
+            Emit16(MakeConstant(std::make_shared<std::string>(varDecl->name)));
             m_globalVariables[varDecl->name] = { varDecl->isConst, finalType };
         }
         else
@@ -496,7 +596,7 @@ private:
         else
         {
             Emit(OP_CONSTANT);
-            Emit(MakeConstant(false));
+            Emit16(MakeConstant(false));
         }
 
         Emit(OP_RETURN);
@@ -504,12 +604,12 @@ private:
         FunctionPtr compiledFunc = EndState();
 
         Emit(OP_CONSTANT);
-        Emit(MakeConstant(compiledFunc));
+        Emit16(MakeConstant(compiledFunc));
 
         if (isGlobalScope())
         {
             Emit(OP_DEFINE_GLOBAL);
-            Emit(MakeConstant(std::make_shared<std::string>(funcDecl->name)));
+            Emit16(MakeConstant(std::make_shared<std::string>(funcDecl->name)));
             m_globalVariables[funcDecl->name] = { true, TypeInfo::Simple(TypeKind::Func) };
         }
         else
@@ -558,7 +658,7 @@ private:
             else
             {
                 Emit(OP_CONSTANT);
-                Emit(MakeConstant(false));
+                Emit16(MakeConstant(false));
             }
         }
         Emit(OP_RETURN);
@@ -663,12 +763,12 @@ private:
         ValidateInterfaces(classDecl->name, classDecl->implementedInterfaces, classInfo);
 
         Emit(OP_CLASS);
-        Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+        Emit16(MakeConstant(std::make_shared<std::string>(classDecl->name)));
 
         if (isGlobalScope())
         {
             Emit(OP_DEFINE_GLOBAL);
-            Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+            Emit16(MakeConstant(std::make_shared<std::string>(classDecl->name)));
             m_globalVariables[classDecl->name] = { true, TypeInfo::Class(classDecl->name) };
         }
         else
@@ -715,7 +815,7 @@ private:
                 else
                 {
                     Emit(OP_CONSTANT);
-                    Emit(MakeConstant(false));
+                    Emit16(MakeConstant(false));
                 }
                 Emit(OP_RETURN);
                 EndScope();
@@ -723,14 +823,14 @@ private:
                 FunctionPtr compiledMethod = EndState();
 
                 Emit(OP_CONSTANT);
-                Emit(MakeConstant(compiledMethod));
+                Emit16(MakeConstant(compiledMethod));
 
-                uint8_t methodNameConst = MakeConstant(std::make_shared<std::string>(funcDeclaration->name));
+                uint16_t methodNameConst = MakeConstant(std::make_shared<std::string>(funcDeclaration->name));
 
                 if (isGlobalScope())
                 {
                     Emit(OP_GET_GLOBAL);
-                    Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                    Emit16(MakeConstant(std::make_shared<std::string>(classDecl->name)));
                 }
                 else
                 {
@@ -748,7 +848,7 @@ private:
                 }
 
                 Emit(OP_METHOD);
-                Emit(methodNameConst);
+                Emit16(methodNameConst);
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
@@ -757,7 +857,7 @@ private:
                     if (isGlobalScope())
                     {
                         Emit(OP_GET_GLOBAL);
-                        Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                        Emit16(MakeConstant(std::make_shared<std::string>(classDecl->name)));
                     }
                     else
                     {
@@ -775,7 +875,7 @@ private:
                     }
 
                     Emit(varDeclaration->isTrackable ? OP_FIELD_TRACKABLE : OP_FIELD);
-                    Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                    Emit16(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
                     Emit(OP_POP);
                 }
             }
@@ -801,19 +901,19 @@ private:
                     }
 
                     Emit(OP_CONSTANT);
-                    Emit(MakeConstant(false));
+                    Emit16(MakeConstant(false));
                     Emit(OP_RETURN);
                     EndScope();
 
                     FunctionPtr compiledGetter = EndState();
 
                     Emit(OP_CONSTANT);
-                    Emit(MakeConstant(compiledGetter));
+                    Emit16(MakeConstant(compiledGetter));
 
                     if (isGlobalScope())
                     {
                         Emit(OP_GET_GLOBAL);
-                        Emit(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                        Emit16(MakeConstant(std::make_shared<std::string>(classDecl->name)));
                     }
                     else
                     {
@@ -830,15 +930,22 @@ private:
                     }
 
                     Emit(OP_METHOD);
-                    Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                    Emit16(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
                 }
             }
         }
 
-        // Auto-generate a default init() if none exists and some fields have default values
         bool classHasExplicitInit = false;
         for (const auto& member : classDecl->members)
-            if (auto* f = dynamic_cast<FuncDeclStmt*>(member.get())) if (f->name == "init") { classHasExplicitInit = true; break; }
+        {
+            if (auto* f = dynamic_cast<FuncDeclStmt*>(member.get()))
+            {
+                if (f->name == "init") {
+                    classHasExplicitInit = true;
+                    break;
+                }
+            }
+        }
 
         if (!classHasExplicitInit)
         {
@@ -846,7 +953,10 @@ private:
             for (const auto& member : classDecl->members)
             {
                 auto* v = dynamic_cast<VarDeclStmt*>(member.get());
-                if (v && !v->isStatic && !v->computedBody && v->initExpr) defaultFields.push_back(v);
+                if (v && !v->isStatic && !v->computedBody && v->initExpr)
+                {
+                    defaultFields.push_back(v);
+                }
             }
             if (!defaultFields.empty())
             {
@@ -859,7 +969,7 @@ private:
                 {
                     Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(0));
                     CompileExpr(v->initExpr.get());
-                    Emit(OP_SET_PROPERTY); Emit(MakeConstant(std::make_shared<std::string>(v->name)));
+                    Emit(OP_SET_PROPERTY); Emit16(MakeConstant(std::make_shared<std::string>(v->name)));
                     Emit(OP_POP);
                 }
 
@@ -867,17 +977,29 @@ private:
                 Emit(OP_RETURN); EndScope();
 
                 FunctionPtr initFunc = EndState();
-                Emit(OP_CONSTANT); Emit(MakeConstant(initFunc));
+                Emit(OP_CONSTANT); Emit16(MakeConstant(initFunc));
 
-                if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(classDecl->name))); }
+                if (isGlobalScope())
+                {
+                    Emit(OP_GET_GLOBAL);
+                    Emit16(MakeConstant(std::make_shared<std::string>(classDecl->name)));
+                }
                 else
                 {
                     int slot = -1;
                     for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
-                        if (m_current->locals[i].name == classDecl->name) { slot = i; break; }
-                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                    {
+                        if (m_current->locals[i].name == classDecl->name)
+                        {
+                            slot = i;
+                            break;
+                        }
+                    }
+                    Emit(OP_GET_LOCAL);
+                    Emit(static_cast<uint8_t>(slot));
                 }
-                Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>("init")));
+                Emit(OP_METHOD);
+                Emit16(MakeConstant(std::make_shared<std::string>("init")));
             }
         }
     }
@@ -896,7 +1018,10 @@ private:
             if (auto* funcDeclaration = dynamic_cast<FuncDeclStmt*>(member.get()))
             {
                 std::vector<TypeInfoPtr> paramTypes;
-                for (const auto& param : funcDeclaration->parameters) { paramTypes.push_back(ResolveType(param.type)); }
+                for (const auto& param : funcDeclaration->parameters)
+                {
+                    paramTypes.push_back(ResolveType(param.type));
+                }
                 structInfo.methods[funcDeclaration->name] = { ResolveType(funcDeclaration->returnType), paramTypes, funcDeclaration->accessLevel };
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
@@ -906,26 +1031,37 @@ private:
                     structInfo.staticFieldNames.insert(varDeclaration->name);
                     continue;
                 }
-                TypeInfoPtr type = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
-                if (varDeclaration->computedBody) structInfo.methods[varDeclaration->name] = { type, {}, varDeclaration->accessLevel };
-                else structInfo.fields[varDeclaration->name] = { type, varDeclaration->isWeak, varDeclaration->accessLevel };
+                TypeInfoPtr type = varDeclaration->typeName.empty()
+                    ? TypeInfo::Simple(TypeKind::Any)
+                    : ResolveType(varDeclaration->typeName);
+                if (varDeclaration->computedBody)
+                {
+                    structInfo.methods[varDeclaration->name] = { type, {}, varDeclaration->accessLevel };
+                }
+                else
+                {
+                    structInfo.fields[varDeclaration->name] = { type, varDeclaration->isWeak, varDeclaration->accessLevel };
+                }
             }
         }
         m_classes[structDecl->name] = structInfo;
         ValidateInterfaces(structDecl->name, structDecl->implementedInterfaces, structInfo);
 
         Emit(OP_STRUCT);
-        Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+        Emit16(MakeConstant(std::make_shared<std::string>(structDecl->name)));
 
         if (isGlobalScope())
         {
-            Emit(OP_DEFINE_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+            Emit(OP_DEFINE_GLOBAL);
+            Emit16(MakeConstant(std::make_shared<std::string>(structDecl->name)));
             m_globalVariables[structDecl->name] = { true, TypeInfo::Class(structDecl->name) };
         }
         else
         {
             int slot = static_cast<int>(m_current->locals.size());
-            Emit(OP_SET_LOCAL); Emit(static_cast<uint8_t>(slot)); Emit(OP_POP);
+            Emit(OP_SET_LOCAL);
+            Emit(static_cast<uint8_t>(slot));
+            Emit(OP_POP);
             m_current->locals.push_back({structDecl->name, m_current->scopeDepth, true, TypeInfo::Class(structDecl->name)});
             m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
         }
@@ -934,69 +1070,139 @@ private:
         {
             if (auto* funcDeclaration = dynamic_cast<FuncDeclStmt*>(member.get()))
             {
-                InitState(funcDeclaration->name, static_cast<int>(funcDeclaration->parameters.size()), ResolveType(funcDeclaration->returnType), TypeInfo::Class(structDecl->name));
+                InitState(
+                    funcDeclaration->name,
+                    static_cast<int>(funcDeclaration->parameters.size()),
+                    ResolveType(funcDeclaration->returnType),
+                    TypeInfo::Class(structDecl->name)
+                );
                 BeginScope();
-                m_current->locals[0].name = "self"; m_current->locals[0].type = TypeInfo::Class(structDecl->name);
+                m_current->locals[0].name = "self";
+                m_current->locals[0].type = TypeInfo::Class(structDecl->name);
                 for (const auto& param : funcDeclaration->parameters)
                 {
                     m_current->locals.push_back({param.name, m_current->scopeDepth, true, ResolveType(param.type)});
                     m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
                 }
-                for (const auto& s : funcDeclaration->body->statements) CompileStmt(s.get());
+                for (const auto& s : funcDeclaration->body->statements)
+                {
+                    CompileStmt(s.get());
+                }
 
-                if (funcDeclaration->name == "init") { Emit(OP_GET_LOCAL); Emit(0); }
-                else { Emit(OP_CONSTANT); Emit(MakeConstant(false)); }
-                Emit(OP_RETURN); EndScope();
+                if (funcDeclaration->name == "init")
+                {
+                    Emit(OP_GET_LOCAL);
+                    Emit(0);
+                }
+                else
+                {
+                    Emit(OP_CONSTANT);
+                    Emit16(MakeConstant(false));
+                }
+                Emit(OP_RETURN);
+                EndScope();
 
                 FunctionPtr compiledMethod = EndState();
-                Emit(OP_CONSTANT); Emit(MakeConstant(compiledMethod));
+                Emit(OP_CONSTANT);
+                Emit16(MakeConstant(compiledMethod));
 
-                if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+                if (isGlobalScope())
+                {
+                    Emit(OP_GET_GLOBAL);
+                    Emit16(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+                }
                 else
                 {
                     int slot = -1;
-                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i) { if (m_current->locals[i].name == structDecl->name) { slot = i; break; } }
-                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                    {
+                        if (m_current->locals[i].name == structDecl->name)
+                        {
+                            slot = i;
+                            break;
+                        }
+                    }
+                    Emit(OP_GET_LOCAL);
+                    Emit(static_cast<uint8_t>(slot));
                 }
-                Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>(funcDeclaration->name)));
+                Emit(OP_METHOD);
+                Emit16(MakeConstant(std::make_shared<std::string>(funcDeclaration->name)));
             }
             else if (auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get()))
             {
                 if (varDeclaration->isStatic)
+                {
                     continue;
+                }
 
                 if (!varDeclaration->computedBody)
                 {
-                    if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+                    if (isGlobalScope())
+                    {
+                        Emit(OP_GET_GLOBAL);
+                        Emit16(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+                    }
                     else
                     {
                         int slot = -1;
-                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i) { if (m_current->locals[i].name == structDecl->name) { slot = i; break; } }
-                        Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        {
+                            if (m_current->locals[i].name == structDecl->name)
+                            {
+                                slot = i;
+                                break;
+                            }
+                        }
+                        Emit(OP_GET_LOCAL);
+                        Emit(static_cast<uint8_t>(slot));
                     }
                     Emit(varDeclaration->isTrackable ? OP_FIELD_TRACKABLE : OP_FIELD);
-                    Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name))); Emit(OP_POP);
+                    Emit16(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                    Emit(OP_POP);
                 }
                 else
                 {
-                    TypeInfoPtr retType = varDeclaration->typeName.empty() ? TypeInfo::Simple(TypeKind::Any) : ResolveType(varDeclaration->typeName);
+                    TypeInfoPtr retType = varDeclaration->typeName.empty()
+                        ? TypeInfo::Simple(TypeKind::Any)
+                        : ResolveType(varDeclaration->typeName);
                     InitState(varDeclaration->name, 0, retType, TypeInfo::Class(structDecl->name));
                     BeginScope();
-                    m_current->locals[0].name = "self"; m_current->locals[0].type = TypeInfo::Class(structDecl->name);
-                    for (const auto& s : varDeclaration->computedBody->statements) CompileStmt(s.get());
-                    Emit(OP_CONSTANT); Emit(MakeConstant(false)); Emit(OP_RETURN); EndScope();
+                    m_current->locals[0].name = "self";
+                    m_current->locals[0].type = TypeInfo::Class(structDecl->name);
+                    for (const auto& s : varDeclaration->computedBody->statements)
+                    {
+                        CompileStmt(s.get());
+                    }
+                    Emit(OP_CONSTANT);
+                    Emit16(MakeConstant(false));
+                    Emit(OP_RETURN);
+                    EndScope();
 
                     FunctionPtr compiledGetter = EndState();
-                    Emit(OP_CONSTANT); Emit(MakeConstant(compiledGetter));
+                    Emit(OP_CONSTANT);
+                    Emit16(MakeConstant(compiledGetter));
 
-                    if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+                    if (isGlobalScope())
+                    {
+                        Emit(OP_GET_GLOBAL);
+                        Emit16(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+                    }
                     else
                     {
                         int slot = -1;
-                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i) { if (m_current->locals[i].name == structDecl->name) { slot = i; break; } }
-                        Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                        for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                        {
+                            if (m_current->locals[i].name == structDecl->name)
+                            {
+                                slot = i;
+                                break;
+                            }
+                        }
+                        Emit(OP_GET_LOCAL);
+                        Emit(static_cast<uint8_t>(slot));
                     }
-                    Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+                    Emit(OP_METHOD);
+                    Emit16(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
                 }
             }
         }
@@ -1004,67 +1210,136 @@ private:
         for (const auto& member : structDecl->members)
         {
             auto* varDeclaration = dynamic_cast<VarDeclStmt*>(member.get());
-            if (!varDeclaration || !varDeclaration->isStatic || !varDeclaration->initExpr) continue;
+            if (!varDeclaration || !varDeclaration->isStatic || !varDeclaration->initExpr)
+            {
+                continue;
+            }
 
             CompileExpr(varDeclaration->initExpr.get());
 
-            if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+            if (isGlobalScope())
+            {
+                Emit(OP_GET_GLOBAL);
+                Emit16(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+            }
             else
             {
                 int slot = -1;
                 for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
                 {
-                    if (m_current->locals[i].name == structDecl->name) { slot = i; break; }
+                    if (m_current->locals[i].name == structDecl->name)
+                    {
+                        slot = i;
+                        break;
+                    }
                 }
-                Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                Emit(OP_GET_LOCAL);
+                Emit(static_cast<uint8_t>(slot));
             }
-            Emit(OP_STATIC_FIELD); Emit(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
+            Emit(OP_STATIC_FIELD);
+            Emit16(MakeConstant(std::make_shared<std::string>(varDeclaration->name)));
         }
 
-        // Auto-generate a default init() if none exists and some fields have default values
         bool hasExplicitInit = false;
         for (const auto& member : structDecl->members)
-            if (auto* f = dynamic_cast<FuncDeclStmt*>(member.get())) if (f->name == "init") { hasExplicitInit = true; break; }
+        {
+            if (auto* f = dynamic_cast<FuncDeclStmt*>(member.get()))
+            {
+                if (f->name == "init")
+                {
+                    hasExplicitInit = true;
+                    break;
+                }
+            }
+        }
 
         if (!hasExplicitInit)
         {
-            std::vector<VarDeclStmt*> defaultFields;
+            std::vector<VarDeclStmt*> requiredFields, defaultFields;
             for (const auto& member : structDecl->members)
             {
                 auto* v = dynamic_cast<VarDeclStmt*>(member.get());
-                if (v && !v->isStatic && !v->computedBody && v->initExpr) defaultFields.push_back(v);
-            }
-            if (!defaultFields.empty())
-            {
-                InitState("init", 0, TypeInfo::Simple(TypeKind::Any), TypeInfo::Class(structDecl->name));
-                BeginScope();
-                m_current->locals[0].name = "self";
-                m_current->locals[0].type = TypeInfo::Class(structDecl->name);
-
-                for (auto* v : defaultFields)
+                if (!v || v->isStatic || v->computedBody)
                 {
-                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(0));
-                    CompileExpr(v->initExpr.get());
-                    Emit(OP_SET_PROPERTY); Emit(MakeConstant(std::make_shared<std::string>(v->name)));
-                    Emit(OP_POP);
+                    continue;
                 }
-
-                Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(0));
-                Emit(OP_RETURN); EndScope();
-
-                FunctionPtr initFunc = EndState();
-                Emit(OP_CONSTANT); Emit(MakeConstant(initFunc));
-
-                if (isGlobalScope()) { Emit(OP_GET_GLOBAL); Emit(MakeConstant(std::make_shared<std::string>(structDecl->name))); }
+                if (v->initExpr)
+                {
+                    defaultFields.push_back(v);
+                }
                 else
                 {
-                    int slot = -1;
-                    for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
-                        if (m_current->locals[i].name == structDecl->name) { slot = i; break; }
-                    Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(slot));
+                    requiredFields.push_back(v);
                 }
-                Emit(OP_METHOD); Emit(MakeConstant(std::make_shared<std::string>("init")));
             }
+
+            int paramCount = static_cast<int>(requiredFields.size());
+
+            std::vector<TypeInfoPtr> initParamTypes(paramCount, TypeInfo::Simple(TypeKind::Any));
+            m_classes[structDecl->name].methods["init"] = { TypeInfo::Class(structDecl->name), initParamTypes, AccessLevel::Internal };
+
+            InitState("init", paramCount, TypeInfo::Simple(TypeKind::Any), TypeInfo::Class(structDecl->name));
+            BeginScope();
+            m_current->locals[0].name = "self";
+            m_current->locals[0].type = TypeInfo::Class(structDecl->name);
+
+            for (int fi = 0; fi < paramCount; ++fi)
+            {
+                m_current->locals.push_back({requiredFields[fi]->name, m_current->scopeDepth, true, TypeInfo::Simple(TypeKind::Any)});
+                m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+            }
+
+            for (int fi = 0; fi < paramCount; ++fi)
+            {
+                Emit(OP_GET_LOCAL);
+                Emit(0);
+                Emit(OP_GET_LOCAL);
+                Emit(static_cast<uint8_t>(fi + 1));
+                Emit(OP_SET_PROPERTY);
+                Emit16(MakeConstant(std::make_shared<std::string>(requiredFields[fi]->name)));
+                Emit(OP_POP);
+            }
+
+            for (auto* v : defaultFields)
+            {
+                Emit(OP_GET_LOCAL); Emit(0);
+                CompileExpr(v->initExpr.get());
+                Emit(OP_SET_PROPERTY);
+                Emit16(MakeConstant(std::make_shared<std::string>(v->name)));
+                Emit(OP_POP);
+            }
+
+            Emit(OP_GET_LOCAL);
+            Emit(0);
+            Emit(OP_RETURN);
+            EndScope();
+
+            FunctionPtr initFunc = EndState();
+            Emit(OP_CONSTANT);
+            Emit16(MakeConstant(initFunc));
+
+            if (isGlobalScope())
+            {
+                Emit(OP_GET_GLOBAL);
+                Emit16(MakeConstant(std::make_shared<std::string>(structDecl->name)));
+            }
+            else
+            {
+                int slot = -1;
+                for (int i = static_cast<int>(m_current->locals.size()) - 1; i >= 0; --i)
+                {
+                    if (m_current->locals[i].name == structDecl->name)
+                    {
+                        slot = i;
+                        break;
+                    }
+                }
+
+                Emit(OP_GET_LOCAL);
+                Emit(static_cast<uint8_t>(slot));
+            }
+            Emit(OP_METHOD);
+            Emit16(MakeConstant(std::make_shared<std::string>("init")));
         }
     }
 
@@ -1123,7 +1398,7 @@ private:
             else
             {
                 Emit(OP_SET_GLOBAL);
-                Emit(MakeConstant(std::make_shared<std::string>(ident->name)));
+                Emit16(MakeConstant(std::make_shared<std::string>(ident->name)));
             }
             m_lastExprType = varType;
         }
@@ -1152,12 +1427,12 @@ private:
         Emit(OP_CONSTANT);
         if (num->isDouble)
         {
-            Emit(MakeConstant(num->value));
+            Emit16(MakeConstant(num->value));
             m_lastExprType = TypeInfo::Simple(TypeKind::Double);
         }
         else
         {
-            Emit(MakeConstant(static_cast<int64_t>(num->value)));
+            Emit16(MakeConstant(static_cast<int64_t>(num->value)));
             m_lastExprType = TypeInfo::Simple(TypeKind::Int);
         }
     }
@@ -1165,14 +1440,14 @@ private:
     void Visit(BoolExpr* b) override
     {
         Emit(OP_CONSTANT);
-        Emit(MakeConstant(b->value));
+        Emit16(MakeConstant(b->value));
         m_lastExprType = TypeInfo::Simple(TypeKind::Bool);
     }
 
     void Visit(StringExpr* str) override
     {
         Emit(OP_CONSTANT);
-        Emit(MakeConstant(std::make_shared<std::string>(str->value)));
+        Emit16(MakeConstant(std::make_shared<std::string>(str->value)));
         m_lastExprType = TypeInfo::Simple(TypeKind::String);
     }
 
@@ -1213,9 +1488,13 @@ private:
             else if (bin->op == "%") Emit(OP_MOD);
 
             if (lType->kind == TypeKind::Double || rType->kind == TypeKind::Double)
+            {
                 m_lastExprType = TypeInfo::Simple(TypeKind::Double);
+            }
             else
+            {
                 m_lastExprType = TypeInfo::Simple(TypeKind::Int);
+            }
             return;
         }
 
@@ -1226,12 +1505,27 @@ private:
                 throw std::runtime_error("Type Error at line " + std::to_string(bin->line) + ": Cannot compare different types");
             }
 
-            if (bin->op == "==") Emit(OP_EQUAL);
-            else if (bin->op == "<") Emit(OP_LESS);
-            else if (bin->op == ">") Emit(OP_GREATER);
-            else if (bin->op == "<=") { Emit(OP_GREATER); Emit(OP_NOT); }
-            else if (bin->op == ">=") { Emit(OP_LESS); Emit(OP_NOT); }
-            else if (bin->op == "!=") { Emit(OP_EQUAL); Emit(OP_NOT); }
+            if (bin->op == "==")
+                Emit(OP_EQUAL);
+            else if (bin->op == "<")
+                Emit(OP_LESS);
+            else if (bin->op == ">")
+                Emit(OP_GREATER);
+            else if (bin->op == "<=")
+            {
+                Emit(OP_GREATER);
+                Emit(OP_NOT);
+            }
+            else if (bin->op == ">=")
+            {
+                Emit(OP_LESS);
+                Emit(OP_NOT);
+            }
+            else if (bin->op == "!=")
+            {
+                Emit(OP_EQUAL);
+                Emit(OP_NOT);
+            }
 
             m_lastExprType = TypeInfo::Simple(TypeKind::Bool);
             return;
@@ -1248,14 +1542,14 @@ private:
             else if (bin->op == "||") Emit(OP_OR);
             
             m_lastExprType = TypeInfo::Simple(TypeKind::Bool);
-            return;
         }
     }
 
     void Visit(IdentifierExpr* ident) override
     {
-        if (ident->name == "self") {
-            if (!m_current->currentClass) throw std::runtime_error("Cannot use 'self' outside class");
+        if (ident->name == "self" && !m_current->currentClass)
+        {
+            throw std::runtime_error("Cannot use 'self' outside class");
         }
 
         int slot = ResolveLocal(m_current, ident->name);
@@ -1298,7 +1592,7 @@ private:
                 }
 
                 Emit(OP_GET_GLOBAL);
-                Emit(MakeConstant(std::make_shared<std::string>(ident->name)));
+                Emit16(MakeConstant(std::make_shared<std::string>(ident->name)));
             }
         }
         m_lastExprType = typeOut;
@@ -1340,7 +1634,7 @@ private:
                         }
                     }
                     Emit(OP_GET_PROPERTY);
-                    Emit(MakeConstant(std::make_shared<std::string>(getCallee->propertyName)));
+                    Emit16(MakeConstant(std::make_shared<std::string>(getCallee->propertyName)));
 
                     if (call->arguments.size() != method.paramTypes.size())
                     {
@@ -1364,9 +1658,11 @@ private:
             }
 
             Emit(OP_GET_PROPERTY);
-            Emit(MakeConstant(std::make_shared<std::string>(getCallee->propertyName)));
+            Emit16(MakeConstant(std::make_shared<std::string>(getCallee->propertyName)));
             for (const auto& arg : call->arguments)
+            {
                 CompileExpr(arg.get());
+            }
             Emit(OP_CALL);
             Emit(static_cast<uint8_t>(call->arguments.size()));
             m_lastExprType = TypeInfo::Simple(TypeKind::Any);
@@ -1478,7 +1774,7 @@ private:
             CompileExpr(getExpr->object.get());
             int jumpIfNull = EmitJump(OP_JUMP_IF_NULL);
             Emit(OP_GET_PROPERTY);
-            Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+            Emit16(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
             int jumpToEnd = EmitJump(OP_JUMP);
             PatchJump(jumpIfNull);
             Emit(OP_NULL);
@@ -1492,15 +1788,30 @@ private:
         if (objType->kind == TypeKind::Array)
         {
             Emit(OP_GET_PROPERTY);
-            Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+            Emit16(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
 
-            if (getExpr->propertyName == "count")
+            if (getExpr->propertyName == "count" ||
+                getExpr->propertyName == "isEmpty")
             {
                 m_lastExprType = TypeInfo::Simple(TypeKind::Int);
             }
+            else if (getExpr->propertyName == "first" ||
+                     getExpr->propertyName == "last")
+            {
+                m_lastExprType = TypeInfo::Simple(TypeKind::Any);
+            }
             else if (getExpr->propertyName == "forEach" ||
                 getExpr->propertyName == "map" ||
-                getExpr->propertyName == "filter")
+                getExpr->propertyName == "filter" ||
+                getExpr->propertyName == "sort" ||
+                getExpr->propertyName == "sorted" ||
+                getExpr->propertyName == "append" ||
+                getExpr->propertyName == "remove" ||
+                getExpr->propertyName == "removeAt" ||
+                getExpr->propertyName == "reversed" ||
+                getExpr->propertyName == "contains" ||
+                getExpr->propertyName == "joined" ||
+                getExpr->propertyName == "reduce")
             {
                 m_lastExprType = TypeInfo::Simple(TypeKind::Func);
             }
@@ -1528,7 +1839,7 @@ private:
                     }
                 }
                 Emit(OP_GET_PROPERTY);
-                Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+                Emit16(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
                 m_lastExprType = klass.fields.at(getExpr->propertyName).type;
                 return;
             }
@@ -1546,7 +1857,7 @@ private:
                     }
                 }
                 Emit(OP_GET_PROPERTY);
-                Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+                Emit16(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
 
                 m_lastExprType = TypeInfo::Simple(TypeKind::Func);
                 return;
@@ -1554,7 +1865,7 @@ private:
             if (klass.staticFieldNames.contains(getExpr->propertyName))
             {
                 Emit(OP_GET_PROPERTY);
-                Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+                Emit16(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
                 m_lastExprType = TypeInfo::Simple(TypeKind::Any);
                 return;
             }
@@ -1562,7 +1873,7 @@ private:
         }
 
         Emit(OP_GET_PROPERTY);
-        Emit(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
+        Emit16(MakeConstant(std::make_shared<std::string>(getExpr->propertyName)));
         m_lastExprType = TypeInfo::Simple(TypeKind::Any);
     }
 
@@ -1606,13 +1917,13 @@ private:
                 Emit(OP_SET_PROPERTY);
             }
 
-            Emit(MakeConstant(std::make_shared<std::string>(setExpr->propertyName)));
+            Emit16(MakeConstant(std::make_shared<std::string>(setExpr->propertyName)));
             m_lastExprType = targetType;
             return;
         }
 
         Emit(OP_SET_PROPERTY);
-        Emit(MakeConstant(std::make_shared<std::string>(setExpr->propertyName)));
+        Emit16(MakeConstant(std::make_shared<std::string>(setExpr->propertyName)));
         m_lastExprType = TypeInfo::Simple(TypeKind::Any);
     }
 
@@ -1644,7 +1955,7 @@ private:
         }
 
         Emit(OP_CONSTANT);
-        Emit(MakeConstant(false));
+        Emit16(MakeConstant(false));
         Emit(OP_RETURN);
 
         EndScope();
@@ -1653,7 +1964,7 @@ private:
         FunctionPtr compiledClosure = EndState();
 
         Emit(OP_CLOSURE);
-        Emit(MakeConstant(compiledClosure));
+        Emit16(MakeConstant(compiledClosure));
         Emit(static_cast<uint8_t>(capturedUpvalues.size()));
 
         for (const auto& uv : capturedUpvalues)
@@ -1671,7 +1982,7 @@ private:
     void Visit(NullExpr* expr) override
     {
         Emit(OP_CONSTANT);
-        Emit(MakeConstant(Null{}));
+        Emit16(MakeConstant(Null{}));
         m_lastExprType = TypeInfo::Simple(TypeKind::Null);
     }
 
@@ -1707,7 +2018,29 @@ private:
 
     void Visit(ImportStmt* stmt) override
     {
-        std::string modulePath = "libs/" + stmt->moduleName + ".rocket";
+        namespace fs = std::filesystem;
+
+        fs::path importPath(stmt->path);
+        if (!importPath.has_extension())
+        {
+            importPath += ".rocket";
+        }
+
+        fs::path resolved;
+        std::string raw = stmt->path;
+        if (raw.starts_with("./") || raw.starts_with("../"))
+        {
+            fs::path base = m_importDirStack.empty()
+                ? fs::current_path()
+                : fs::path(m_importDirStack.back());
+            resolved = fs::weakly_canonical(base / importPath);
+        }
+        else
+        {
+            resolved = fs::weakly_canonical(fs::current_path() / importPath);
+        }
+
+        std::string modulePath = resolved.string();
 
         if (m_importedModules.contains(modulePath))
         {
@@ -1718,16 +2051,19 @@ private:
         {
             throw std::runtime_error("Circular dependency detected: " + modulePath);
         }
+
         m_importStack.insert(modulePath);
 
         std::ifstream file(modulePath);
         if (!file.is_open())
         {
-            throw std::runtime_error("Compile Error: Could not open imported module file: " + modulePath);
+            throw std::runtime_error("Compile Error: Could not open imported file: " + modulePath);
         }
 
         std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         file.close();
+
+        m_importDirStack.push_back(resolved.parent_path().string());
 
         Lexer moduleLexer(source);
         std::vector<Token> moduleTokens = moduleLexer.Tokenize();
@@ -1739,8 +2075,141 @@ private:
             astNode->Accept(this);
         }
 
+        m_importDirStack.pop_back();
         m_importStack.erase(modulePath);
         m_importedModules.insert(modulePath);
+    }
+
+    void Visit(ForInStmt* stmt) override
+    {
+        BeginScope();
+
+        CompileExpr(stmt->iterable.get());
+        int iterSlot = static_cast<int>(m_current->locals.size());
+        Emit(OP_SET_LOCAL);
+        Emit(static_cast<uint8_t>(iterSlot));
+        Emit(OP_POP);
+        m_current->locals.push_back({"__iter", m_current->scopeDepth, true, TypeInfo::Simple(TypeKind::Any)});
+        m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+
+        Emit(OP_GET_LOCAL);
+        Emit(static_cast<uint8_t>(iterSlot));
+        Emit(OP_ARRAY_LEN);
+        int lenSlot = static_cast<int>(m_current->locals.size());
+        Emit(OP_SET_LOCAL);
+        Emit(static_cast<uint8_t>(lenSlot));
+        Emit(OP_POP);
+        m_current->locals.push_back({"__len", m_current->scopeDepth, true, TypeInfo::Simple(TypeKind::Int)});
+        m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+
+        Emit(OP_CONSTANT);
+        Emit16(MakeConstant(0));
+        int iSlot = static_cast<int>(m_current->locals.size());
+        Emit(OP_SET_LOCAL);
+        Emit(static_cast<uint8_t>(iSlot));
+        Emit(OP_POP);
+        m_current->locals.push_back({"__i", m_current->scopeDepth, false, TypeInfo::Simple(TypeKind::Int)});
+        m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+
+        int loopStart = static_cast<int>(m_current->function->chunk->code.size());
+        Emit(OP_GET_LOCAL);
+        Emit(static_cast<uint8_t>(iSlot));
+        Emit(OP_GET_LOCAL);
+        Emit(static_cast<uint8_t>(lenSlot));
+        Emit(OP_LESS);
+        int exitJump = EmitJump(OP_JUMP_IF_FALSE);
+
+        BeginScope();
+        Emit(OP_GET_LOCAL);
+        Emit(static_cast<uint8_t>(iterSlot));
+        Emit(OP_GET_LOCAL);
+        Emit(static_cast<uint8_t>(iSlot));
+        Emit(OP_GET_INDEX);
+        int itemSlot = static_cast<int>(m_current->locals.size());
+        Emit(OP_SET_LOCAL);
+        Emit(static_cast<uint8_t>(itemSlot));
+        Emit(OP_POP);
+        m_current->locals.push_back({stmt->varName, m_current->scopeDepth, true, TypeInfo::Simple(TypeKind::Any)});
+        m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+
+        for (const auto& s : stmt->body->statements)
+        {
+            CompileStmt(s.get());
+        }
+
+        EndScope();
+
+        Emit(OP_GET_LOCAL); Emit(static_cast<uint8_t>(iSlot));
+        Emit(OP_CONSTANT); Emit16(MakeConstant(1));
+        Emit(OP_ADD);
+        Emit(OP_SET_LOCAL); Emit(static_cast<uint8_t>(iSlot));
+        Emit(OP_POP);
+
+        int loopJump = EmitJump(OP_JUMP);
+        m_current->function->chunk->code[loopJump] = (loopStart >> 8) & 0xff;
+        m_current->function->chunk->code[loopJump + 1] = loopStart & 0xff;
+        PatchJump(exitJump);
+
+        EndScope();
+    }
+
+    void Visit(EnumDeclStmt* stmt) override
+    {
+        ClassInfo enumInfo;
+        enumInfo.name = stmt->name;
+        for (const auto& c : stmt->cases)
+        {
+            enumInfo.staticFieldNames.insert(c);
+        }
+        m_classes[stmt->name] = enumInfo;
+
+        Emit(OP_CLASS);
+        Emit16(MakeConstant(std::make_shared<std::string>(stmt->name)));
+
+        if (isGlobalScope())
+        {
+            Emit(OP_DEFINE_GLOBAL);
+            Emit16(MakeConstant(std::make_shared<std::string>(stmt->name)));
+            m_globalVariables[stmt->name] = { true, TypeInfo::Class(stmt->name) };
+        }
+        else
+        {
+            int slot = static_cast<int>(m_current->locals.size());
+            Emit(OP_SET_LOCAL); Emit(static_cast<uint8_t>(slot)); Emit(OP_POP);
+            m_current->locals.push_back({stmt->name, m_current->scopeDepth, true, TypeInfo::Class(stmt->name)});
+            m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
+        }
+
+        for (int i = 0; i < static_cast<int>(stmt->cases.size()); ++i)
+        {
+            const std::string& caseName = stmt->cases[i];
+
+            Emit(OP_CONSTANT);
+            Emit16(MakeConstant(i));
+
+            if (isGlobalScope())
+            {
+                Emit(OP_GET_GLOBAL);
+                Emit16(MakeConstant(std::make_shared<std::string>(stmt->name)));
+            }
+            else
+            {
+                int slot = -1;
+                for (int j = static_cast<int>(m_current->locals.size()) - 1; j >= 0; --j)
+                {
+                    if (m_current->locals[j].name == stmt->name)
+                    {
+                        slot = j;
+                        break;
+                    }
+                }
+                Emit(OP_GET_LOCAL);
+                Emit(static_cast<uint8_t>(slot));
+            }
+
+            Emit(OP_STATIC_FIELD);
+            Emit16(MakeConstant(std::make_shared<std::string>(caseName)));
+        }
     }
 
     void Visit(IfLetStmt* stmt) override
@@ -1754,18 +2223,22 @@ private:
         Emit(static_cast<uint8_t>(xSlot));
         Emit(OP_POP);
         m_current->locals.push_back({stmt->varName, m_current->scopeDepth, stmt->isConst, TypeInfo::Simple(TypeKind::Any)});
-        m_current->maxLocals = std::max(m_current->maxLocals, (int)m_current->locals.size());
+        m_current->maxLocals = std::max(m_current->maxLocals, static_cast<int>(m_current->locals.size()));
 
         CompileStmt(stmt->trueBlock.get());
 
         if (!m_current->locals.empty() && m_current->locals.back().name == stmt->varName)
+        {
             m_current->locals.pop_back();
+        }
 
         int jumpToEnd = EmitJump(OP_JUMP);
         PatchJump(jumpToElse);
 
         if (stmt->falseBlock)
+        {
             CompileStmt(stmt->falseBlock.get());
+        }
 
         PatchJump(jumpToEnd);
     }

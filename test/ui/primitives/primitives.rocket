@@ -1,4 +1,4 @@
-import UI
+import "libs/UI"
 
 class DemoViewModel {
     trackable let inputText: String = ""
@@ -22,10 +22,10 @@ struct PrimitivesDemo: View {
     tracked let vm: DemoViewModel = DemoViewModel()
 
     let view: any View {
-        return VBox(18.0) {
+        return VBox(18.0, HAlign.center) {
             return [
                 Text("TEXT primitive", 22.0, Color.white),
-                HBox(20.0) {
+                HBox(20.0, VAlign.center) {
                     return [
                         Text("white/22", 22.0, Color.white),
                         Text("orange/18", 18.0, Color.orange),
@@ -36,7 +36,7 @@ struct PrimitivesDemo: View {
                 },
 
                 Text("RECT + COLOR palette", 22.0, Color.white),
-                HBox(8.0) {
+                HBox(8.0, VAlign.center) {
                     return [
                         Rect(55.0, 36.0, Color.red),
                         Rect(55.0, 36.0, Color.green),
@@ -51,7 +51,7 @@ struct PrimitivesDemo: View {
                 },
 
                 Text("BUTTON primitive", 22.0, Color.white),
-                HBox(12.0) {
+                HBox(12.0, VAlign.center) {
                     return [
                         Button("Press me", Color.blue) {
                             self.vm.onPress()
@@ -73,23 +73,23 @@ struct PrimitivesDemo: View {
                 Text(self.vm.inputText, 16.0, Color.green),
 
                 Text("VBOX + HBOX layout", 22.0, Color.white),
-                HBox(10.0) {
+                HBox(10.0, VAlign.center) {
                     return [
-                        VBox(6.0) {
+                        VBox(6.0, HAlign.center) {
                             return [
                                 Rect(70.0, 28.0, Color.red),
                                 Rect(70.0, 28.0, Color.green),
                                 Rect(70.0, 28.0, Color.blue)
                             ]
                         },
-                        VBox(6.0) {
+                        VBox(6.0, HAlign.center) {
                             return [
                                 Rect(70.0, 28.0, Color.orange),
                                 Rect(70.0, 28.0, Color.purple),
                                 Rect(70.0, 28.0, Color.teal)
                             ]
                         },
-                        VBox(6.0) {
+                        VBox(6.0, HAlign.center) {
                             return [
                                 Rect(70.0, 90.0, Color.gray),
                                 Rect(70.0, 8.0, Color.white)
@@ -104,6 +104,6 @@ struct PrimitivesDemo: View {
 
 let app = App()
 
-app.run("Rocket -- All UI Primitives") {
+app.run("Rocket -- All UI Primitives", 800, 600) {
     return PrimitivesDemo()
 }

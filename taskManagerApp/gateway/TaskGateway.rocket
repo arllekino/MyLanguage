@@ -1,0 +1,47 @@
+import "libs/Net"
+import "../model/entity/Task"
+
+class TaskGateway {
+    let baseUrl: String
+
+    init(url: String) {
+        self.baseUrl = url
+    }
+
+    func getDemoToken(): String {
+        let res = Http.post(self.baseUrl + "/api/dev/token", "")
+        if (res.isOk) {
+            let data = Json.parse(res.value)
+            return "" + data.token
+        }
+        return ""
+    }
+
+    func fetchTasks(): Array<Task> {
+        let res = Http.get(self.baseUrl + "/api/v1/tasks")
+        if (res.isOk) {
+            let items = Json.parse(res.value)
+            return items.map { item in
+                Task("" + item.id, "" + item.title, "" + item.description, "" + item.status)
+            }
+        }
+        return []
+    }
+
+    func createTask(title: String, desc: String, status: String): Bool {
+        let body = "{\"title\":\"" + title + "\",\"description\":\"" + desc + "\",\"status\":\"" + status + "\"}"
+        let res = Http.post(self.baseUrl + "/api/v1/tasks", body)
+        return res.isOk
+    }
+
+    func updateTask(id: String, title: String, desc: String, status: String): Bool {
+        let body = "{\"title\":\"" + title + "\",\"description\":\"" + desc + "\",\"status\":\"" + status + "\"}"
+        let res = Http.put(self.baseUrl + "/api/v1/tasks/" + id, body)
+        return res.isOk
+    }
+
+    func deleteTask(id: String): Bool {
+        let res = Http.delete(self.baseUrl + "/api/v1/tasks/" + id)
+        return res.isOk
+    }
+}

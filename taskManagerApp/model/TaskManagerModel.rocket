@@ -1,0 +1,46 @@
+import "./entity/Task"
+import "../gateway/TaskGateway"
+
+class TaskManagerModel {
+    let gateway: TaskGateway = TaskGateway("http://127.0.0.1:8082")
+
+    func fetchTasks(): Array<Task> {
+        return self.gateway.fetchTasks()
+    }
+
+    func getDemoToken(): String {
+        return self.gateway.getDemoToken()
+    }
+
+    func todoTasks(tasks: Array<Task>): Array<Task> {
+        return tasks.filter { task in task.status == "todo" }
+    }
+
+    func inProgressTasks(tasks: Array<Task>): Array<Task> {
+        return tasks.filter { task in task.status == "in_progress" }
+    }
+
+    func resolvedTasks(tasks: Array<Task>): Array<Task> {
+        return tasks.filter { task in task.status == "resolved" }
+    }
+
+    func createTask(title: String, desc: String, status: String) {
+        self.gateway.createTask(title, desc, status)
+    }
+
+    func updateTask(id: String, title: String, desc: String, status: String) {
+        self.gateway.updateTask(id, title, desc, status)
+    }
+
+    func deleteTask(id: String) {
+        self.gateway.deleteTask(id)
+    }
+
+    func resolveTask(id: String, tasks: Array<Task>) {
+        tasks.forEach { task in
+            if (task.id == id) {
+                self.gateway.updateTask(id, task.title, task.description, "resolved")
+            }
+        }
+    }
+}

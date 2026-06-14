@@ -5,6 +5,10 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <thread>
+#include <chrono>
+#include <ctime>
+#include <algorithm>
+#include <sstream>
 
 #include "Value/Value.h"
 #include "OpCode.h"
@@ -40,6 +44,7 @@ public:
         if (withUI) DefineNativeUIFunctions();
         DefineNativeNetFunctions();
         DefineNativeAsyncFunctions();
+        DefineNativeDateFunctions();
     }
 
     void DefineGlobal(const std::string& name, const Value& value)
@@ -105,6 +110,7 @@ private:
 
     UIRenderer m_uiRenderer;
     bool m_uiInitialized = false;
+    std::atomic<bool> m_uiDirty{false};
 
     KlassPtr m_jsonObjectKlass;
     KlassPtr m_resultKlass;
@@ -123,7 +129,7 @@ private:
 
     Value ReadConstant()
     {
-        return m_frames.back().function->chunk->constants[ReadByte()];
+        return m_frames.back().function->chunk->constants[ReadShort()];
     }
 
     Value Pop()
@@ -244,8 +250,21 @@ private:
         throw std::runtime_error(errMsg);
     }
 
+    std::string GetStackTrace() const
+    {
+        std::string trace = "\nStack trace:";
+        for (int i = static_cast<int>(m_frames.size()) - 1; i >= 0; --i)
+        {
+            const auto& frame = m_frames[i];
+            std::string name = frame.function ? frame.function->name : "?";
+            trace += "\n  at " + name + "()";
+        }
+        return trace;
+    }
+
     void Run(size_t targetDepth = 0)
     {
+        try {
         for (;;) {
             switch (const auto opcode = ReadByte())
             {
@@ -771,13 +790,91 @@ private:
                         } else if (propName == "isEmpty") {
                             Push(str->empty());
                             break;
-                        } else if (propName == "trimmed") {
+                        } else if (propName == "trimmed" || propName == "trim") {
                             bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
                                 auto s = std::get<StringPtr>(rec);
                                 size_t start = s->find_first_not_of(" \t\n\r");
                                 size_t end   = s->find_last_not_of(" \t\n\r");
                                 if (start == std::string::npos) return std::make_shared<std::string>("");
                                 return std::make_shared<std::string>(s->substr(start, end - start + 1));
+                            };
+                        } else if (propName == "contains") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                if (args.empty()) return false;
+                                auto argStr = std::get<StringPtr>(args[0]);
+                                return s->find(*argStr) != std::string::npos;
+                            };
+                        } else if (propName == "replace") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                if (args.size() < 2) return rec;
+                                std::string from = *std::get<StringPtr>(args[0]);
+                                std::string to   = *std::get<StringPtr>(args[1]);
+                                std::string result = *s;
+                                size_t pos = 0;
+                                while ((pos = result.find(from, pos)) != std::string::npos) {
+                                    result.replace(pos, from.size(), to);
+                                    pos += to.size();
+                                }
+                                return std::make_shared<std::string>(result);
+                            };
+                        } else if (propName == "split") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                std::string sep = args.empty() ? " " : *std::get<StringPtr>(args[0]);
+                                auto arr = std::make_shared<Array>();
+                                if (sep.empty()) {
+                                    for (char c : *s) arr->values.push_back(std::make_shared<std::string>(1, c));
+                                    return arr;
+                                }
+                                size_t start = 0, pos = 0;
+                                while ((pos = s->find(sep, start)) != std::string::npos) {
+                                    arr->values.push_back(std::make_shared<std::string>(s->substr(start, pos - start)));
+                                    start = pos + sep.size();
+                                }
+                                arr->values.push_back(std::make_shared<std::string>(s->substr(start)));
+                                return arr;
+                            };
+                        } else if (propName == "startsWith" || propName == "hasPrefix") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                if (args.empty()) return false;
+                                auto prefix = std::get<StringPtr>(args[0]);
+                                return s->size() >= prefix->size() && s->substr(0, prefix->size()) == *prefix;
+                            };
+                        } else if (propName == "endsWith" || propName == "hasSuffix") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                if (args.empty()) return false;
+                                auto suffix = std::get<StringPtr>(args[0]);
+                                if (s->size() < suffix->size()) return false;
+                                return s->substr(s->size() - suffix->size()) == *suffix;
+                            };
+                        } else if (propName == "toUpperCase" || propName == "uppercased") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                std::string result = *s;
+                                std::transform(result.begin(), result.end(), result.begin(), ::toupper);
+                                return std::make_shared<std::string>(result);
+                            };
+                        } else if (propName == "toLowerCase" || propName == "lowercased") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                std::string result = *s;
+                                std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+                                return std::make_shared<std::string>(result);
+                            };
+                        } else if (propName == "substring") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto s = std::get<StringPtr>(rec);
+                                if (args.size() < 2) return rec;
+                                int64_t from = std::get<int64_t>(args[0]);
+                                int64_t to   = std::get<int64_t>(args[1]);
+                                if (from < 0) from = 0;
+                                if (to > (int64_t)s->size()) to = (int64_t)s->size();
+                                if (from >= to) return std::make_shared<std::string>("");
+                                return std::make_shared<std::string>(s->substr(from, to - from));
                             };
                         } else {
                             throw std::runtime_error("String has no property '" + propName + "'");
@@ -796,6 +893,18 @@ private:
                             Push(static_cast<int64_t>(arr->values.size()));
                             break;
                         }
+                        if (propName == "isEmpty") {
+                            Push(arr->values.empty());
+                            break;
+                        }
+                        if (propName == "first") {
+                            Push(arr->values.empty() ? Value(Null{}) : arr->values.front());
+                            break;
+                        }
+                        if (propName == "last") {
+                            Push(arr->values.empty() ? Value(Null{}) : arr->values.back());
+                            break;
+                        }
 
                         auto bound = std::make_shared<NativeBoundMethod>();
                         bound->receiver = instanceVal;
@@ -805,7 +914,7 @@ private:
                                 auto array = std::get<ArrayPtr>(rec);
                                 auto closure = Expect<ClosurePtr>(args[0], "forEach expects a closure");
                                 for (const auto& val : array->values) {
-                                    Value nestedResult = CallClosure(closure, {val});
+                                    CallClosure(closure, {val});
                                 }
                                 return Null{};
                             };
@@ -831,6 +940,106 @@ private:
                                     }
                                 }
                                 return newArr;
+                            };
+                        } else if (propName == "append") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                if (!args.empty()) array->values.push_back(args[0]);
+                                return Null{};
+                            };
+                        } else if (propName == "remove" || propName == "removeAt") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                if (args.empty()) return Null{};
+                                int64_t idx = std::get<int64_t>(args[0]);
+                                if (idx < 0 || idx >= (int64_t)array->values.size())
+                                    throw std::runtime_error("Array index out of bounds in remove()");
+                                Value removed = array->values[idx];
+                                array->values.erase(array->values.begin() + idx);
+                                return removed;
+                            };
+                        } else if (propName == "sort") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                std::sort(array->values.begin(), array->values.end(), [](const Value& a, const Value& b) {
+                                    if (std::holds_alternative<int64_t>(a) && std::holds_alternative<int64_t>(b))
+                                        return std::get<int64_t>(a) < std::get<int64_t>(b);
+                                    if (std::holds_alternative<double>(a) && std::holds_alternative<double>(b))
+                                        return std::get<double>(a) < std::get<double>(b);
+                                    if (std::holds_alternative<int64_t>(a) && std::holds_alternative<double>(b))
+                                        return (double)std::get<int64_t>(a) < std::get<double>(b);
+                                    if (std::holds_alternative<double>(a) && std::holds_alternative<int64_t>(b))
+                                        return std::get<double>(a) < (double)std::get<int64_t>(b);
+                                    if (std::holds_alternative<StringPtr>(a) && std::holds_alternative<StringPtr>(b))
+                                        return *std::get<StringPtr>(a) < *std::get<StringPtr>(b);
+                                    return false;
+                                });
+                                return Null{};
+                            };
+                        } else if (propName == "sorted") {
+                            bound->func = [this](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                auto newArr = std::make_shared<Array>();
+                                newArr->values = array->values;
+                                if (!args.empty() && std::holds_alternative<ClosurePtr>(args[0])) {
+                                    auto cmp = std::get<ClosurePtr>(args[0]);
+                                    std::sort(newArr->values.begin(), newArr->values.end(), [&](const Value& a, const Value& b) {
+                                        Value r = CallClosure(cmp, {a, b});
+                                        return std::holds_alternative<bool>(r) && std::get<bool>(r);
+                                    });
+                                } else {
+                                    std::sort(newArr->values.begin(), newArr->values.end(), [](const Value& a, const Value& b) {
+                                        if (std::holds_alternative<int64_t>(a) && std::holds_alternative<int64_t>(b))
+                                            return std::get<int64_t>(a) < std::get<int64_t>(b);
+                                        if (std::holds_alternative<double>(a) && std::holds_alternative<double>(b))
+                                            return std::get<double>(a) < std::get<double>(b);
+                                        if (std::holds_alternative<StringPtr>(a) && std::holds_alternative<StringPtr>(b))
+                                            return *std::get<StringPtr>(a) < *std::get<StringPtr>(b);
+                                        return false;
+                                    });
+                                }
+                                return newArr;
+                            };
+                        } else if (propName == "reversed") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                auto newArr = std::make_shared<Array>();
+                                newArr->values = array->values;
+                                std::reverse(newArr->values.begin(), newArr->values.end());
+                                return newArr;
+                            };
+                        } else if (propName == "contains") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                if (args.empty()) return false;
+                                const Value& needle = args[0];
+                                for (const auto& v : array->values) {
+                                    if (v == needle) return true;
+                                }
+                                return false;
+                            };
+                        } else if (propName == "joined") {
+                            bound->func = [](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                std::string sep = args.empty() ? "" : *std::get<StringPtr>(args[0]);
+                                std::string result;
+                                for (size_t k = 0; k < array->values.size(); ++k) {
+                                    if (k > 0) result += sep;
+                                    if (std::holds_alternative<StringPtr>(array->values[k]))
+                                        result += *std::get<StringPtr>(array->values[k]);
+                                }
+                                return std::make_shared<std::string>(result);
+                            };
+                        } else if (propName == "reduce") {
+                            bound->func = [this](Value rec, const std::vector<Value>& args) -> Value {
+                                auto array = std::get<ArrayPtr>(rec);
+                                if (args.size() < 2) return Null{};
+                                Value acc = args[0];
+                                auto closure = Expect<ClosurePtr>(args[1], "reduce expects a closure as second argument");
+                                for (const auto& val : array->values) {
+                                    acc = CallClosure(closure, {acc, val});
+                                }
+                                return acc;
                             };
                         } else {
                             throw std::runtime_error("Unknown array method: " + propName);
@@ -910,6 +1119,7 @@ private:
                         std::unique_lock<std::shared_mutex> lock(*instance->trackMutex);
                         instance->fields[propName] = CloneIfStruct(valueToSet);
                         instance->version.fetch_add(1, std::memory_order_release);
+                        m_uiDirty.store(true, std::memory_order_release);
                     }
                     else
                     {
@@ -1056,6 +1266,12 @@ private:
                     throw std::runtime_error("Unknown opcode: " + std::to_string(opcode));
             }
         }
+        } catch (const std::runtime_error& e) {
+            std::string msg = e.what();
+            if (msg.find("Stack trace:") == std::string::npos)
+                msg += GetStackTrace();
+            throw std::runtime_error(msg);
+        }
     }
 
     void DefineNativeFunctions()
@@ -1155,6 +1371,8 @@ private:
             int64_t height = Expect<int64_t>(args[1], "height must be Int");
             if (m_uiInitialized) {
                 m_uiRenderer.BeginFrame(static_cast<int>(width), static_cast<int>(height));
+                if (m_uiRenderer.GetScrollDelta() != 0.0f)
+                    m_uiDirty.store(true, std::memory_order_release);
             }
             return Null{};
         });
@@ -1175,6 +1393,26 @@ private:
             m_uiRenderer.DrawRect(
                 static_cast<float>(x), static_cast<float>(y),
                 static_cast<float>(w), static_cast<float>(h),
+                glm::vec4(r, g, b, a)
+            );
+            return Null{};
+        });
+
+        DefineNative("UIDrawRoundedRect", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return Null{};
+            double x      = AsDouble(args[0], "x must be number");
+            double y      = AsDouble(args[1], "y must be number");
+            double w      = AsDouble(args[2], "w must be number");
+            double h      = AsDouble(args[3], "h must be number");
+            double radius = AsDouble(args[4], "radius must be number");
+            double r      = AsDouble(args[5], "r must be number");
+            double g      = AsDouble(args[6], "g must be number");
+            double b      = AsDouble(args[7], "b must be number");
+            double a      = AsDouble(args[8], "a must be number");
+            m_uiRenderer.DrawRoundedRect(
+                static_cast<float>(x), static_cast<float>(y),
+                static_cast<float>(w), static_cast<float>(h),
+                static_cast<float>(radius),
                 glm::vec4(r, g, b, a)
             );
             return Null{};
@@ -1276,6 +1514,32 @@ private:
             auto inst = std::get<InstancePtr>(args[0]);
             return inst->version.load(std::memory_order_acquire);
         });
+
+        DefineNative("UIIsDirty", [this](const std::vector<Value>& args) -> Value {
+            return m_uiDirty.exchange(false, std::memory_order_acq_rel);
+        });
+
+        DefineNative("UIGetScrollDelta", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return 0.0;
+            return static_cast<double>(m_uiRenderer.GetScrollDelta());
+        });
+
+        DefineNative("UIBeginClip", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized || args.size() < 4) return Null{};
+            auto toF = [](const Value& v) -> float {
+                if (std::holds_alternative<double>(v)) return static_cast<float>(std::get<double>(v));
+                if (std::holds_alternative<int64_t>(v)) return static_cast<float>(std::get<int64_t>(v));
+                return 0.f;
+            };
+            m_uiRenderer.BeginClip(toF(args[0]), toF(args[1]), toF(args[2]), toF(args[3]));
+            return Null{};
+        });
+
+        DefineNative("UIEndClip", [this](const std::vector<Value>& args) -> Value {
+            if (!m_uiInitialized) return Null{};
+            m_uiRenderer.EndClip();
+            return Null{};
+        });
     }
 
     InstancePtr MakeResult(bool ok, const Value& value, const std::string& error) {
@@ -1349,7 +1613,6 @@ private:
 
     void DefineNativeAsyncFunctions()
     {
-        // Low-level: spawn a closure in a detached thread, fire-and-forget
         auto spawnImpl = [this](const std::vector<Value>& args) -> Value {
             if (args.empty()) return Null{};
             if (!std::holds_alternative<ClosurePtr>(args[0])) return Null{};
@@ -1371,7 +1634,123 @@ private:
 
         DefineNative("spawn", spawnImpl);
 
-        // High-level: Async { } — syntactic sugar over spawn, called as trailing closure
         DefineNative("Async", spawnImpl);
+    }
+
+    void DefineNativeDateFunctions()
+    {
+        DefineNative("DateNow", [](const std::vector<Value>& args) -> Value {
+            auto now = std::chrono::system_clock::now();
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+            return static_cast<double>(ms);
+        });
+
+        DefineNative("DateTimestamp", [](const std::vector<Value>& args) -> Value {
+            auto now = std::chrono::system_clock::now();
+            auto secs = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+            return static_cast<double>(secs);
+        });
+
+        DefineNative("DateFormat", [](const std::vector<Value>& args) -> Value {
+            if (args.size() < 2) return std::make_shared<std::string>("");
+            double ms = std::holds_alternative<double>(args[0])
+                ? std::get<double>(args[0])
+                : static_cast<double>(std::get<int64_t>(args[0]));
+            std::string pattern = *std::get<StringPtr>(args[1]);
+            time_t secs = static_cast<time_t>(ms / 1000.0);
+            struct tm* tm_info = localtime(&secs);
+            char buf[256];
+            strftime(buf, sizeof(buf), pattern.c_str(), tm_info);
+            return std::make_shared<std::string>(buf);
+        });
+
+        DefineNative("DateYear", [](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_year + 1900);
+        });
+        DefineNative("DateMonth", [](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_mon + 1);
+        });
+        DefineNative("DateDay", [](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_mday);
+        });
+        DefineNative("DateHour", [](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_hour);
+        });
+        DefineNative("DateMinute", [](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_min);
+        });
+        DefineNative("DateSecond", [](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr);
+            struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_sec);
+        });
+
+        auto dateKlass = std::make_shared<Klass>();
+        dateKlass->name = "Date";
+
+        auto makeNative = [](std::function<Value(const std::vector<Value>&)> fn) -> Value {
+            auto nf = std::make_shared<NativeFunction>();
+            nf->func = fn;
+            return nf;
+        };
+
+        dateKlass->staticFields["now"] = makeNative([](const std::vector<Value>& args) -> Value {
+            auto now = std::chrono::system_clock::now();
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+            return static_cast<double>(ms);
+        });
+        dateKlass->staticFields["timestamp"] = makeNative([](const std::vector<Value>& args) -> Value {
+            auto now = std::chrono::system_clock::now();
+            auto secs = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+            return static_cast<double>(secs);
+        });
+        dateKlass->staticFields["format"] = makeNative([](const std::vector<Value>& args) -> Value {
+            if (args.size() < 2) return std::make_shared<std::string>("");
+            double ms = std::holds_alternative<double>(args[0])
+                ? std::get<double>(args[0])
+                : static_cast<double>(std::get<int64_t>(args[0]));
+            std::string pattern = *std::get<StringPtr>(args[1]);
+            time_t secs = static_cast<time_t>(ms / 1000.0);
+            struct tm* tm_info = localtime(&secs);
+            char buf[256];
+            strftime(buf, sizeof(buf), pattern.c_str(), tm_info);
+            return std::make_shared<std::string>(buf);
+        });
+        dateKlass->staticFields["year"] = makeNative([](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr); struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_year + 1900);
+        });
+        dateKlass->staticFields["month"] = makeNative([](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr); struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_mon + 1);
+        });
+        dateKlass->staticFields["day"] = makeNative([](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr); struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_mday);
+        });
+        dateKlass->staticFields["hour"] = makeNative([](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr); struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_hour);
+        });
+        dateKlass->staticFields["minute"] = makeNative([](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr); struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_min);
+        });
+        dateKlass->staticFields["second"] = makeNative([](const std::vector<Value>& args) -> Value {
+            time_t now = time(nullptr); struct tm* t = localtime(&now);
+            return static_cast<int64_t>(t->tm_sec);
+        });
+
+        m_globals["Date"] = dateKlass;
     }
 };

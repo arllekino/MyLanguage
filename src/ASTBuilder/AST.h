@@ -32,6 +32,8 @@ struct InterfaceDeclStmt;
 struct ImportStmt;
 struct IfLetStmt;
 struct AwaitExpr;
+struct ForInStmt;
+struct EnumDeclStmt;
 
 class Visitor
 {
@@ -65,6 +67,8 @@ public:
     virtual void Visit(FuncDeclStmt* node) = 0;
     virtual void Visit(InterfaceDeclStmt* node) = 0;
     virtual void Visit(ImportStmt* node) = 0;
+    virtual void Visit(ForInStmt* node) = 0;
+    virtual void Visit(EnumDeclStmt* node) = 0;
 };
 
 struct ASTNode
@@ -285,10 +289,10 @@ struct InterfaceDeclStmt : Stmt
 
 struct ImportStmt : Stmt
 {
-    std::string moduleName;
+    std::string path;
 
-    explicit ImportStmt(std::string name)
-        : moduleName(std::move(name)) {}
+    explicit ImportStmt(std::string path)
+        : path(std::move(path)) {}
 
     void Accept(Visitor* v) override { v->Visit(this); }
 };
@@ -309,5 +313,20 @@ struct AwaitExpr : Expr
     std::unique_ptr<Expr> expr;
 
     explicit AwaitExpr(std::unique_ptr<Expr> expr) : expr(std::move(expr)) {}
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
+struct ForInStmt : Stmt
+{
+    std::string varName;
+    std::unique_ptr<Expr> iterable;
+    std::unique_ptr<BlockStmt> body;
+    void Accept(Visitor* v) override { v->Visit(this); }
+};
+
+struct EnumDeclStmt : Stmt
+{
+    std::string name;
+    std::vector<std::string> cases;
     void Accept(Visitor* v) override { v->Visit(this); }
 };

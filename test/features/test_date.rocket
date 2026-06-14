@@ -1,0 +1,11 @@
+let now = DateNow()
+print(now)
+
+print(DateYear())
+print(DateMonth())
+print(DateDay())
+print(DateHour())
+print(DateMinute())
+
+let formatted = DateFormat(now, "%Y-%m-%d %H:%M:%S")
+print(formatted)
