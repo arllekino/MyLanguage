@@ -280,13 +280,16 @@ struct TextField : View {
             let pre = UITextBufGet(self.fieldId)
             let typed = UIGetPendingText()
             if (typed != "") {
-                UITextBufSet(self.fieldId, pre + typed)
-                self.onChange(pre + typed)
+                let newVal = pre + typed
+                UITextBufSet(self.fieldId, newVal)
+                UITextBufSetLastSeen(self.fieldId, newVal)
+                self.onChange(newVal)
             }
             if (UIIsBackspacePressed()) {
                 if (pre.count > 0) {
                     let trimmed = pre.dropLast()
                     UITextBufSet(self.fieldId, trimmed)
+                    UITextBufSetLastSeen(self.fieldId, trimmed)
                     self.onChange(trimmed)
                 }
             }

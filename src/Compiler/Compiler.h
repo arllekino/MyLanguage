@@ -2370,11 +2370,22 @@ private:
         }
         if (actual->kind == TypeKind::Null)
         {
-            return true;
+            return expected->kind == TypeKind::Optional
+                || expected->kind == TypeKind::Any
+                || expected->kind == TypeKind::Interface
+                || expected->kind == TypeKind::Class;
         }
         if (expected->kind == TypeKind::Func && actual->kind == TypeKind::Func)
         {
             return true;
+        }
+
+        if (expected->kind == TypeKind::Optional)
+        {
+            if (actual->kind == TypeKind::Optional)
+                return AreTypesCompatible(actual->elementType, expected->elementType);
+            // String is assignable to String?
+            return AreTypesCompatible(actual, expected->elementType);
         }
 
         if (expected->kind == TypeKind::Interface)
@@ -2399,11 +2410,6 @@ private:
                 }
             }
             return false;
-        }
-
-        if (expected->kind == TypeKind::Optional && actual->kind == TypeKind::Optional)
-        {
-            return AreTypesCompatible(actual->elementType, expected->elementType);
         }
 
         if (expected->kind == TypeKind::Array && actual->kind == TypeKind::Array)

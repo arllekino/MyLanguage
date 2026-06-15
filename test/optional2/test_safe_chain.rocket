@@ -13,7 +13,6 @@ func getUser(logged: Bool): User {
     return null
 }
 
-// Safe chain: user?.name returns null if user is null
 let user1 = getUser(true)
 let n1 = user1?.name ?? "Guest"
 print(n1)  // Alice

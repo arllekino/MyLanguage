@@ -1,14 +1,14 @@
 // Test 1: ?? operator
-let name: String = null
+let name: String? = null
 let displayName = name ?? "Anonymous"
 print(displayName)  // Anonymous
 
-let greeting: String = "Hello"
+let greeting: String? = "Hello"
 let result = greeting ?? "Fallback"
 print(result)  // Hello
 
 // Test 2: if let
-func findUser(id: Int): String {
+func findUser(id: Int): String? {
     if (id == 1) {
         return "Alice"
     }
@@ -30,8 +30,8 @@ if let u = (missing) {
 }
 
 // Test 3: chained ??
-let a: String = null
-let b: String = null
-let c: String = "Found C"
+let a: String? = null
+let b: String? = null
+let c: String? = "Found C"
 let val = a ?? b ?? c
 print(val)  // Found C

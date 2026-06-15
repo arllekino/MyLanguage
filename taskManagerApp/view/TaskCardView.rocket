@@ -2,7 +2,7 @@ import "libs/UI"
 import "../model/entity/Task"
 import "../presentation/TaskViewModel"
 
-struct StageBar : View {
+struct StageBar: View {
     let view: any View { return null }
     let width: Double
     let height: Double
@@ -34,26 +34,40 @@ struct StageBar : View {
     }
 }
 
-struct TaskCardView : View {
+struct TaskCardView: View {
     let task: Task
     let vm: TaskViewModel
 
     func statusLabel(status: String): String {
-        if (status == "todo") { return "Todo" }
-        if (status == "in_progress") { return "In Progress" }
-        if (status == "resolved") { return "Resolved" }
+        if (status == "todo") {
+            return "Todo"
+        }
+        if (status == "in_progress") {
+            return "In Progress"
+        }
+        if (status == "resolved") {
+            return "Resolved"
+        }
         return status
     }
 
     func statusTextColor(status: String): Color {
-        if (status == "in_progress") { return Color(0.1, 0.4, 0.85) }
-        if (status == "resolved") { return Color(0.05, 0.58, 0.35) }
+        if (status == "in_progress") {
+            return Color(0.1, 0.4, 0.85)
+        }
+        if (status == "resolved") {
+            return Color(0.05, 0.58, 0.35)
+        }
         return Color(0.42, 0.47, 0.57)
     }
 
     func statusBgColor(status: String): Color {
-        if (status == "in_progress") { return Color(0.88, 0.94, 1.0) }
-        if (status == "resolved") { return Color(0.87, 0.97, 0.9) }
+        if (status == "in_progress") {
+            return Color(0.88, 0.94, 1.0)
+        }
+        if (status == "resolved") {
+            return Color(0.87, 0.97, 0.9)
+        }
         return Color(0.91, 0.92, 0.95)
     }
 
@@ -79,7 +93,9 @@ struct TaskCardView : View {
         let statusBadge = Text(label, 10.0, txtColor).padding(5.0).background(bgColor, 1.0).cornerRadius(4.0)
         let idBadge = Text("#" + self.task.id, 10.0, Color(0.55, 0.6, 0.67)).padding(5.0).background(Color(0.91, 0.92, 0.95), 1.0).cornerRadius(4.0)
 
-        let btns = [Button("Edit", Color(0.42, 0.47, 0.57)) { self.vm.startEdit(self.task.id) }]
+        let btns = [Button("Edit", Color(0.42, 0.47, 0.57)) {
+            self.vm.startEdit(self.task.id)
+        }]
         if (self.task.status != "resolved") {
             btns.append(Button("Resolve", Color.green) { self.vm.resolveTask(self.task.id) })
         }
@@ -102,7 +118,10 @@ struct TaskCardView : View {
                     ]
                 }
             ]
-        }.padding(12.0).background(Color.white, 1.0).cornerRadius(8.0)
+        }
+        .padding(12.0)
+        .background(Color.white, 1.0)
+        .cornerRadius(8.0)
     }
 
     init(task: Task, vm: TaskViewModel) {

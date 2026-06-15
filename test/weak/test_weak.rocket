@@ -1,0 +1,23 @@
+
+class TreeNode {
+    let value: String
+    let weak parent: TreeNode
+
+    init(v: String) {
+        self.value = v
+    }
+}
+
+let root = TreeNode("root")
+let child = TreeNode("child")
+child.parent = root
+
+print(child.value)         // child
+print(child.parent.value)  // root
+
+let grandchild = TreeNode("grandchild")
+grandchild.parent = child
+
+print(grandchild.value)               // grandchild
+print(grandchild.parent.value)        // child
+print(grandchild.parent.parent.value) // root

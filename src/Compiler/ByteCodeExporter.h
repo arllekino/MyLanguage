@@ -50,25 +50,29 @@ public:
             {
                 if (std::holds_alternative<int64_t>(c))
                 {
-                    uint8_t tag = 0; out.write(reinterpret_cast<const char*>(&tag), 1);
+                    uint8_t tag = 0;
+                    out.write(reinterpret_cast<const char*>(&tag), 1);
                     int64_t v = std::get<int64_t>(c);
                     out.write(reinterpret_cast<const char*>(&v), sizeof(v));
                 }
                 else if (std::holds_alternative<double>(c))
                 {
-                    uint8_t tag = 1; out.write(reinterpret_cast<const char*>(&tag), 1);
+                    uint8_t tag = 1;
+                    out.write(reinterpret_cast<const char*>(&tag), 1);
                     double v = std::get<double>(c);
                     out.write(reinterpret_cast<const char*>(&v), sizeof(v));
                 }
                 else if (std::holds_alternative<bool>(c))
                 {
-                    uint8_t tag = 2; out.write(reinterpret_cast<const char*>(&tag), 1);
+                    uint8_t tag = 2;
+                    out.write(reinterpret_cast<const char*>(&tag), 1);
                     bool v = std::get<bool>(c);
                     out.write(reinterpret_cast<const char*>(&v), sizeof(v));
                 }
                 else if (std::holds_alternative<StringPtr>(c))
                 {
-                    uint8_t tag = 3; out.write(reinterpret_cast<const char*>(&tag), 1);
+                    uint8_t tag = 3;
+                    out.write(reinterpret_cast<const char*>(&tag), 1);
                     auto str = std::get<StringPtr>(c);
                     auto slen = static_cast<uint32_t>(str->size());
                     out.write(reinterpret_cast<const char*>(&slen), sizeof(slen));
@@ -76,13 +80,15 @@ public:
                 }
                 else if (std::holds_alternative<FunctionPtr>(c))
                 {
-                    uint8_t tag = 4; out.write(reinterpret_cast<const char*>(&tag), 1);
+                    uint8_t tag = 4;
+                    out.write(reinterpret_cast<const char*>(&tag), 1);
                     uint32_t fid = m_funcIds[std::get<FunctionPtr>(c).get()];
                     out.write(reinterpret_cast<const char*>(&fid), sizeof(fid));
                 }
                 else if (std::holds_alternative<Null>(c))
                 {
-                    uint8_t tag = 5; out.write(reinterpret_cast<const char*>(&tag), 1);
+                    uint8_t tag = 5;
+                    out.write(reinterpret_cast<const char*>(&tag), 1);
                 }
             }
 
@@ -101,7 +107,10 @@ private:
 
     void CollectFunctions(const FunctionPtr& func)
     {
-        if (m_funcIds.contains(func.get())) return;
+        if (m_funcIds.contains(func.get()))
+        {
+            return;
+        }
 
         auto id = static_cast<uint32_t>(m_allFuncs.size());
         m_funcIds[func.get()] = id;

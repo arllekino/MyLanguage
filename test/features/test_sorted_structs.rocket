@@ -1,0 +1,32 @@
+struct Task {
+    let name: String
+    let priority: Int
+}
+
+let t1 = Task("Buy groceries", 3)
+let t2 = Task("Fix bug", 1)
+let t3 = Task("Write tests", 2)
+let t4 = Task("Deploy", 1)
+
+let tasks = [t1, t2, t3, t4]
+
+// Sort by priority ascending
+let byPriority = tasks.sorted { a, b in a.priority < b.priority }
+for t in byPriority {
+    print(t.priority)
+    print(t.name)
+}
+
+print("---")
+
+// Sort by name alphabetically
+let byName = tasks.sorted { a, b in a.name < b.name }
+for t in byName {
+    print(t.name)
+}
+
+print("---")
+
+// reduce with named params: sum of priorities
+let total = tasks.reduce(0) { acc, t in acc + t.priority }
+print(total)

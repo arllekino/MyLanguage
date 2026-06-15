@@ -38,8 +38,18 @@ class TaskViewModel {
 
     func save() {
         if (self.viewState.editingId != "") {
-            self.model.updateTask(self.viewState.editingId, self.viewState.formTitle, self.viewState.formDesc, self.viewState.formStatus)
+            let updated = []
+            self.viewState.tasks.forEach { task in
+                if (task.id == self.viewState.editingId) {
+                    task.title = self.viewState.formTitle
+                    task.description = self.viewState.formDesc
+                    task.status = self.viewState.formStatus
+                }
+                updated.append(task)
+            }
+            self.viewState.tasks = updated
             self.viewState.activity = "Task updated"
+            self.model.updateTask(self.viewState.editingId, self.viewState.formTitle, self.viewState.formDesc, self.viewState.formStatus)
         } else {
             self.model.createTask(self.viewState.formTitle, self.viewState.formDesc, self.viewState.formStatus)
             self.viewState.activity = "Task created"
@@ -48,7 +58,6 @@ class TaskViewModel {
         self.viewState.formTitle = ""
         self.viewState.formDesc = ""
         self.viewState.formStatus = "todo"
-        self.refresh()
     }
 
     func deleteTask(id: String) {
