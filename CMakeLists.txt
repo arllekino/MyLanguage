@@ -96,7 +96,10 @@ add_custom_command(TARGET MyLanguage POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/taskManagerApp"
         "$<TARGET_FILE_DIR:MyLanguage>/taskManagerApp"
-    COMMENT "Syncing libs/, test/, and taskManagerApp/ to build directory"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:MyLanguage>/assets"
+    COMMENT "Syncing libs/, test/, taskManagerApp/, and assets/ to build directory"
 )
 
 add_executable(MyLanguageTest test/test.cpp)

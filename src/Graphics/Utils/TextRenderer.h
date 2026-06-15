@@ -21,10 +21,19 @@ public:
 
     bool Init() {
         static const char* fontPaths[] = {
+            "assets/DejaVuSans.ttf",
+            // macOS system fonts
             "/System/Library/Fonts/SFNS.ttf",
             "/System/Library/Fonts/Helvetica.ttc",
             "/System/Library/Fonts/Geneva.ttf",
             "/Library/Fonts/Arial Unicode.ttf",
+            // Linux / Docker fonts
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu-sans/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            "/usr/share/fonts/gnu-free/FreeSans.ttf",
         };
 
         std::vector<uint8_t> fontData;
