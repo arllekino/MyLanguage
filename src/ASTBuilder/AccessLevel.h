@@ -3,5 +3,6 @@
 enum class AccessLevel
 {
     Internal,
+    Public,
     Private
 };

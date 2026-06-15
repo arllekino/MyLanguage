@@ -1129,9 +1129,13 @@ private:
         }
         if (MatchKeyword("internal"))
         {
-            return AccessLevel::Internal;
+            return AccessLevel::Public;
         }
-        return AccessLevel::Internal;
+        if (MatchKeyword("public"))
+        {
+            return AccessLevel::Public;
+        }
+        return AccessLevel::Public;
     }
 
     std::unique_ptr<Expr> ParseLambdaExpression()

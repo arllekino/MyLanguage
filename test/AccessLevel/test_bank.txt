@@ -9,7 +9,7 @@ class BankAccount {
         self.balance = balance
     }
 
-    internal func deposit(amount: Double): Void {
+    public func deposit(amount: Double): Void {
         self.balance = self.balance + amount
         print("Tax will be:")
         print(self.tax)

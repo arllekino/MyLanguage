@@ -119,7 +119,7 @@ struct BlockStmt : Stmt
 
 struct VarDeclStmt : Stmt
 {
-    AccessLevel accessLevel = AccessLevel::Internal;
+    AccessLevel accessLevel = AccessLevel::Public;
     bool isConst;
     bool isWeak = false;
     bool isStatic = false;
@@ -264,7 +264,7 @@ struct ReturnStmt : Stmt
 
 struct FuncDeclStmt : Stmt
 {
-    AccessLevel accessLevel = AccessLevel::Internal;
+    AccessLevel accessLevel = AccessLevel::Public;
     bool isAsync = false;
     std::string name;
     std::vector<Parameter> parameters;

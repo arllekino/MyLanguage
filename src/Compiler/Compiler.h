@@ -210,14 +210,14 @@ private:
     {
         TypeInfoPtr returnType;
         std::vector<TypeInfoPtr> paramTypes;
-        AccessLevel accessLevel = AccessLevel::Internal;
+        AccessLevel accessLevel = AccessLevel::Public;
     };
 
     struct FieldInfo
     {
         TypeInfoPtr type;
         bool isWeak{};
-        AccessLevel accessLevel = AccessLevel::Internal;
+        AccessLevel accessLevel = AccessLevel::Public;
     };
 
     struct ClassInfo
@@ -1285,7 +1285,7 @@ private:
             int paramCount = static_cast<int>(requiredFields.size());
 
             std::vector<TypeInfoPtr> initParamTypes(paramCount, TypeInfo::Simple(TypeKind::Any));
-            m_classes[structDecl->name].methods["init"] = { TypeInfo::Class(structDecl->name), initParamTypes, AccessLevel::Internal };
+            m_classes[structDecl->name].methods["init"] = { TypeInfo::Class(structDecl->name), initParamTypes, AccessLevel::Public };
 
             InitState("init", paramCount, TypeInfo::Simple(TypeKind::Any), TypeInfo::Class(structDecl->name));
             BeginScope();
@@ -2016,12 +2016,12 @@ private:
             {
                 paramTypes.push_back(ResolveType(param.type));
             }
-            m_interfaces[interfaceDecl->name].methods[method->name] = { ResolveType(method->returnType), paramTypes, AccessLevel::Internal };
+            m_interfaces[interfaceDecl->name].methods[method->name] = { ResolveType(method->returnType), paramTypes, AccessLevel::Public };
         }
 
         for (const auto& prop : interfaceDecl->properties)
         {
-            m_interfaces[interfaceDecl->name].properties[prop->name] = { ResolveType(prop->typeName), false, AccessLevel::Internal };
+            m_interfaces[interfaceDecl->name].properties[prop->name] = { ResolveType(prop->typeName), false, AccessLevel::Public };
         }
     }
 
