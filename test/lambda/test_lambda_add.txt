@@ -1,4 +1,4 @@
-// Тестирование анонимных функций (Lambdas)
+// анонимные функции
 
 print("--- Test 1: Simple Lambda ---")
 let add = (a: Int, b: Int): Int {
@@ -17,8 +17,7 @@ greet("Miroslav")
 
 
 print("--- Test 3: Higher Order Functions ---")
-// 3. Передача лямбды в функцию как аргумента
-// (Используем тип Any для функции, так как мы еще не добавили тип Func в парсер типов)
+// передача лямбды в функцию как аргумент
 func calculate(x: Int, y: Int, operation: Any): Int {
     return operation(x, y)
 }
@@ -28,15 +27,11 @@ let multiply = (a: Int, b: Int): Int {
 }
 
 let result = calculate(4, 5, multiply)
-print(result) // Ожидается: 20
+print(result) // 20
 
 
-print("--- Test 4: Returning Lambda ---")
-// 4. Функция, которая возвращает лямбду
+print("--- Test 4: Returning lambda ---")
 func getMultiplier(factor: Int): Any {
-    // ВНИМАНИЕ: Здесь factor будет работать только если он передан как аргумент самой лямбде,
-    // так как захват внешних переменных мы еще не сделали.
-    // Поэтому мы прокидываем его явно:
     let lambda = (value: Int, f: Int): Int {
         return value * f
     }
@@ -44,4 +39,4 @@ func getMultiplier(factor: Int): Any {
 }
 
 let doubler = getMultiplier(2)
-print(doubler(10, 2)) // Ожидается: 20
+print(doubler(10, 2)) // 20

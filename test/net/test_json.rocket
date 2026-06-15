@@ -1,24 +1,22 @@
 import "libs/Net"
 
-// Test JSON parse
 let json = "{\"name\":\"Alice\",\"age\":30,\"active\":true}"
 let obj = Json.parse(json)
 print(obj.name)    // Alice
 print(obj.age)     // 30
 print(obj.active)  // true
 
-// Test nested JSON
 let json2 = "{\"user\":{\"id\":1,\"tags\":[\"admin\",\"dev\"]}}"
 let data = Json.parse(json2)
 print(data.user.id)         // 1
 print(data.user.tags[0])    // admin
 print(data.user.tags[1])    // dev
 
-// Test JSON stringify
+// JSON stringify
 let encoded = Json.stringify(obj)
 print(encoded)
 
-// Test Result.ok and Result.error
+// Result.ok and Result.error
 let r1 = Result.ok("success!")
 print(r1.isOk)   // true
 print(r1.value)  // success!
@@ -27,7 +25,7 @@ let r2 = Result.error("something went wrong")
 print(r2.isOk)   // false
 print(r2.error)  // something went wrong
 
-// Test if let with Result
+// if let with Result
 if let v = (r1.value) {
     print("Got: " + v)
 }

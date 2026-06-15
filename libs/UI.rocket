@@ -22,8 +22,6 @@ enum VAlign {
     case bottom
 }
 
-// Color
-
 struct Color {
     let r: Double
     let g: Double
@@ -108,8 +106,6 @@ struct StyledView : View {
     }
 }
 
-// Rect
-
 struct Rect : View {
     let view: any View { return null }
     let width: Double
@@ -149,8 +145,6 @@ struct Rect : View {
         return s
     }
 }
-
-// Text
 
 struct Text : View {
     let view: any View { return null }
@@ -195,8 +189,6 @@ struct Text : View {
         return s
     }
 }
-
-// Button
 
 struct Button : View {
     let view: any View { return null }
@@ -248,8 +240,6 @@ struct Button : View {
         return StyledView(self, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, r)
     }
 }
-
-// TextField
 
 struct TextField : View {
     let view: any View { return null }
@@ -332,9 +322,6 @@ struct TextField : View {
     }
 }
 
-// VBox
-// align: "start" | "center" | "end"
-
 struct VBox : View {
     let view: any View { return null }
     let width: Double
@@ -405,9 +392,6 @@ struct VBox : View {
         return s
     }
 }
-
-// HBox
-// align: "top" | "center" | "bottom"
 
 struct HBox : View {
     let view: any View { return null }
@@ -480,9 +464,6 @@ struct HBox : View {
     }
 }
 
-// ScrollView
-// scrollY — tracked offset, managed by the caller's ViewModel
-
 struct ScrollView : View {
     let view: any View { return null }
     let width: Double
@@ -522,8 +503,6 @@ struct ScrollView : View {
         return s
     }
 }
-
-// App
 
 class App {
     func run(title: String, width: Int, height: Int, content: (): any View) {

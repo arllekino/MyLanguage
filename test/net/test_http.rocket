@@ -1,6 +1,5 @@
 import "libs/Net"
 
-// GET public JSON API
 let res = Http.get("https://jsonplaceholder.typicode.com/todos/1")
 if (res.isOk) {
     let todo = Json.parse(res.value)
@@ -10,7 +9,6 @@ if (res.isOk) {
     print("Error: " + res.error)
 }
 
-// POST example
 let body = Json.stringify(Json.parse("{\"title\":\"New task\",\"completed\":false,\"userId\":1}"))
 let postRes = Http.post("https://jsonplaceholder.typicode.com/todos", body)
 if (postRes.isOk) {
@@ -20,7 +18,6 @@ if (postRes.isOk) {
     print("POST error: " + postRes.error)
 }
 
-// Error handling — bad URL
 let badRes = Http.get("https://this-domain-does-not-exist-xyz.rocket")
 if (badRes.isOk == false) {
     print("Got expected error for bad URL")

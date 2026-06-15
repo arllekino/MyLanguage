@@ -6,7 +6,6 @@
 #include <vector>
 #include <string>
 #include <memory>
-#include <cmath>
 #include <algorithm>
 
 #include "./Utils/Shader/Program.h"
@@ -150,8 +149,6 @@ public:
         m_logicalHeight = height;
     }
 
-    // Returns true if any user input arrived (mouse move/click, key, scroll).
-    // Clears previous frame's input state and waits for events (blocking if !alreadyDirty).
     bool WaitOrPoll(bool alreadyDirty)
     {
         m_pendingText      = "";
@@ -159,7 +156,7 @@ public:
         m_enterPressed     = false;
         m_scrollDeltaY     = 0.0f;
         m_mouseMoved       = false;
-        m_mouseJustPressed = false;  // cleared before polling; callback sets it during poll
+        m_mouseJustPressed = false;
         m_mouseDownPrev    = m_mouseDown;
 
         if (alreadyDirty)
@@ -171,7 +168,6 @@ public:
         glfwGetCursorPos(m_window, &mx, &my);
         m_mouseX = static_cast<float>(mx);
         m_mouseY = static_cast<float>(my);
-        // m_mouseDown is now maintained by the mouse button callback
 
         return m_mouseJustPressed
             || (m_mouseDown != m_mouseDownPrev)
@@ -257,15 +253,22 @@ public:
         return m_mouseJustPressed;
     }
 
-    bool IsMouseJustReleased() const {
+    bool IsMouseJustReleased() const
+    {
         return !m_mouseDown && m_mouseDownPrev;
     }
 
-    float GetScrollDelta() const { return m_scrollDeltaY; }
+    float GetScrollDelta() const
+    {
+        return m_scrollDeltaY;
+    }
 
     void FlushBatch()
     {
-        if (m_vertices.empty()) return;
+        if (m_vertices.empty())
+        {
+            return;
+        }
         glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
         glBufferSubData(GL_ARRAY_BUFFER, 0, m_vertices.size() * sizeof(UIVertex), m_vertices.data());
         glBindVertexArray(m_vao);
