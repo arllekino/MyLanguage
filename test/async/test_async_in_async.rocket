@@ -1,0 +1,21 @@
+import "libs/Net"
+
+Async {
+    let x = 10
+    let y = 20
+    Async {
+        let z = x + y
+        print(z)
+    }
+    print(x)
+    print(y)
+}
+
+async func fetchAndPrint(url: String, label: String) {
+    let res = Http.get(url)
+    if (res.isOk) {
+        let parsed = Json.parse(res.value)
+        print(label + ": " + parsed.title)
+    }
+}
+await fetchAndPrint("https://jsonplaceholder.typicode.com/todos/1", "todo-1")

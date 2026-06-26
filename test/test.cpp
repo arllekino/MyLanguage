@@ -13,7 +13,7 @@ void Execute(const std::string& executorPath, const std::string& testPath)
 
 TEST_CASE("Language Tests")
 {
-    const std::string executor = "/Users/miroslav.aktuganov/CLionProjects/MyLanguage/cmake-build-debug/MyLanguage";
+    const std::string executor = "/Users/miroslav.aktuganov/CLionProjects/MyLanguage/cmake-build-release/MyLanguage";
     const std::string testPath = "/Users/miroslav.aktuganov/CLionProjects/MyLanguage/test";
 
     if (fs::exists(testPath) && fs::is_directory(testPath))

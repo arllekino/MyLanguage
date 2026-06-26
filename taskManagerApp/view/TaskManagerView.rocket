@@ -24,13 +24,16 @@ struct TaskManagerView : View {
                         Button("Refresh", Color(0.35, 0.38, 0.45)) { self.vm.refresh() },
                         Button("Demo Token", Color.blue) { self.vm.getDemoToken() }
                     ]
-                }.padding(20.0).background(Color.white, 1.0),
+                }
+                .padding(20.0)
+                .background(Color.white, 1.0),
                 HBox(16.0, VAlign.top) {
                     return [
                         PipelineBoardView(self.vm),
                         SidebarView(self.vm)
                     ]
-                }.padding(16.0)
+                }
+                .padding(16.0)
             ]
         }
     }
